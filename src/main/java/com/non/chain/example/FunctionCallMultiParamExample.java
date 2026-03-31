@@ -2,6 +2,7 @@ package com.non.chain.example;
 
 import com.non.chain.*;
 import com.non.chain.provider.DashscopeLLM;
+import com.non.chain.provider.LLM;
 import com.non.chain.tool.*;
 
 import java.util.ArrayList;
@@ -34,7 +35,7 @@ public class FunctionCallMultiParamExample {
     // ===== 主流程 =====
 
     public static void main(String[] args) {
-        ChatResult.LLM llm = new DashscopeLLM(
+        LLM llm = new DashscopeLLM(
                 "qwen-plus",
                 512
         );
@@ -48,7 +49,7 @@ public class FunctionCallMultiParamExample {
 
     // ---- 注解方式 ----
 
-    static void demoAnnotation(ChatResult.LLM llm) {
+    static void demoAnnotation(LLM llm) {
         ToolRegistry registry = new ToolRegistry().scan(new WeatherService());
         List<Tool> tools = registry.getTools();
 
@@ -64,7 +65,7 @@ public class FunctionCallMultiParamExample {
 
     // ---- Fluent 方式 ----
 
-    static void demoFluent(ChatResult.LLM llm) {
+    static void demoFluent(LLM llm) {
         ToolRegistry registry = new ToolRegistry();
 
         registry.register("get_weather", "查询指定城市的天气信息")
@@ -86,7 +87,7 @@ public class FunctionCallMultiParamExample {
 
     // ---- 通用工具调用循环 ----
 
-    static void runToolLoop(ChatResult.LLM llm, ToolRegistry registry, List<Tool> tools, String question) {
+    static void runToolLoop(LLM llm, ToolRegistry registry, List<Tool> tools, String question) {
         System.out.println("用户: " + question);
         System.out.println();
 

@@ -3,6 +3,7 @@ package com.non.chain.example;
 import com.non.chain.*;
 import com.non.chain.flow.*;
 import com.non.chain.provider.DashscopeLLM;
+import com.non.chain.provider.LLM;
 import com.non.chain.tool.*;
 
 /**
@@ -14,7 +15,7 @@ import com.non.chain.tool.*;
 public class EasyWorkflowExample {
 
     public static void main(String[] args) {
-        ChatResult.LLM llm = new DashscopeLLM(
+        LLM llm = new DashscopeLLM(
                 "qwen3.5-35b-a3b",
                 512
         ).enableThinking(true).thinkingBudget(512);
@@ -25,7 +26,7 @@ public class EasyWorkflowExample {
                 // ---- 节点 ----
 
                 .addNode(new Node("classify", state -> {
-                    ChatResult.LLM chat = state.<ChatResult.LLM>get("llm").orElseThrow();
+                    LLM chat = state.<LLM>get("llm").orElseThrow();
                     String userInput = state.getOrDefault("userInput", "");
 
                     ChatResult result = chat.chat(
@@ -41,7 +42,7 @@ public class EasyWorkflowExample {
                 }))
 
                 .addNode(new Node("technical", state -> {
-                    ChatResult.LLM chat = state.<ChatResult.LLM>get("llm").orElseThrow();
+                    LLM chat = state.<LLM>get("llm").orElseThrow();
                     String userInput = state.getOrDefault("userInput", "");
 
                     ChatResult result = chat.chat(
@@ -55,7 +56,7 @@ public class EasyWorkflowExample {
                 }))
 
                 .addNode(new Node("general", state -> {
-                    ChatResult.LLM chat = state.<ChatResult.LLM>get("llm").orElseThrow();
+                    LLM chat = state.<LLM>get("llm").orElseThrow();
                     String userInput = state.getOrDefault("userInput", "");
 
                     ChatResult result = chat.chat(
@@ -69,7 +70,7 @@ public class EasyWorkflowExample {
                 }))
 
                 .addNode(new Node("summarize", state -> {
-                    ChatResult.LLM chat = state.<ChatResult.LLM>get("llm").orElseThrow();
+                    LLM chat = state.<LLM>get("llm").orElseThrow();
                     String draft = state.getOrDefault("draftAnswer", "");
 
                     ChatResult result = chat.chat(

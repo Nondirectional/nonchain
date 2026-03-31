@@ -2,6 +2,7 @@ package com.non.chain.example;
 
 import com.non.chain.*;
 import com.non.chain.provider.DashscopeLLM;
+import com.non.chain.provider.LLM;
 import com.non.chain.tool.*;
 
 import java.util.ArrayList;
@@ -28,7 +29,7 @@ public class FunctionCallExample {
     }
 
     public static void main(String[] args) {
-        ChatResult.LLM llm = new DashscopeLLM(
+        LLM llm = new DashscopeLLM(
                 "qwen-plus",
                 512
         );

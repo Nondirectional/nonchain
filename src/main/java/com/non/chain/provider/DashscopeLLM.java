@@ -12,7 +12,7 @@ import com.openai.models.chat.completions.*;
 import java.util.List;
 import java.util.stream.Collectors;
 
-public class DashscopeLLM implements ChatResult.LLM {
+public class DashscopeLLM implements LLM {
 
     private static final String DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final String API_KEY_ENV = "DASHSCOPE_API_KEY";
