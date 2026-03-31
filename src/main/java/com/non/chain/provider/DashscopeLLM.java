@@ -2,12 +2,15 @@ package com.non.chain.provider;
 
 import com.non.chain.ChatResult;
 import com.non.chain.Message;
+import com.non.chain.OutputFormat;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
+import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.chat.completions.*;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -16,18 +19,24 @@ public class DashscopeLLM implements LLM {
 
     private static final String DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1";
     private static final String API_KEY_ENV = "DASHSCOPE_API_KEY";
+    private static final String RESPONSE_FORMAT_JSON_OBJECT = "json_object";
 
     private final OpenAIClient client;
     private final String model;
-    private final int maxCompletionTokens;
+    private final Integer maxCompletionTokens;
     private boolean enableThinking;
     private Integer thinkingBudget;
+    private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
 
-    public DashscopeLLM(String model, int maxCompletionTokens) {
+    public DashscopeLLM(String model) {
+        this(null, model,null);
+    }
+
+    public DashscopeLLM(String model, Integer maxCompletionTokens) {
         this(null, model, maxCompletionTokens);
     }
 
-    public DashscopeLLM(String apiKey, String model, int maxCompletionTokens) {
+    public DashscopeLLM(String apiKey, String model, Integer maxCompletionTokens) {
         this.client = OpenAIOkHttpClient.builder()
                 .apiKey(resolveApiKey(apiKey))
                 .baseUrl(DEFAULT_BASE_URL)
@@ -59,36 +68,46 @@ public class DashscopeLLM implements LLM {
         return this;
     }
 
-    @Override
-    public ChatResult chat(String systemMessage, String userMessage) {
-        return chat(systemMessage, userMessage, null);
+    public DashscopeLLM enableJsonObjectMode(boolean enable) {
+        this.defaultOutputFormat = enable ? OutputFormat.JSON_OBJECT : OutputFormat.TEXT;
+        return this;
     }
 
     @Override
-    public ChatResult chat(List<Message> messages) {
-        return chat(messages, null);
+    public ChatResult chat(String systemMessage, String userMessage, OutputFormat outputFormat) {
+        return chat(systemMessage, userMessage, null, outputFormat);
     }
 
     @Override
-    public ChatResult chat(String systemMessage, String userMessage, List<Tool> tools) {
+    public ChatResult chat(List<Message> messages, OutputFormat outputFormat) {
+        return chat(messages, null, outputFormat);
+    }
+
+    @Override
+    public ChatResult chat(String systemMessage, String userMessage, List<Tool> tools, OutputFormat outputFormat) {
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .model(model)
-                .maxCompletionTokens(maxCompletionTokens)
                 .addUserMessage(userMessage);
-
+        if(maxCompletionTokens != null) {
+            builder.maxCompletionTokens(maxCompletionTokens);
+        }
         if (systemMessage != null && !systemMessage.isBlank()) {
             builder.addSystemMessage(systemMessage);
         }
 
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
         addTools(builder, tools);
-        return doChat(builder);
+        return doChat(builder, resolvedOutputFormat);
     }
 
     @Override
-    public ChatResult chat(List<Message> messages, List<Tool> tools) {
+    public ChatResult chat(List<Message> messages, List<Tool> tools, OutputFormat outputFormat) {
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
-                .model(model)
-                .maxCompletionTokens(maxCompletionTokens);
+                .model(model);
+        if(maxCompletionTokens != null) {
+            builder.maxCompletionTokens(maxCompletionTokens);
+        }
 
         for (Message msg : messages) {
             switch (msg.role()) {
@@ -132,8 +151,20 @@ public class DashscopeLLM implements LLM {
             }
         }
 
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
         addTools(builder, tools);
-        return doChat(builder);
+        return doChat(builder, resolvedOutputFormat);
+    }
+
+    private OutputFormat resolveOutputFormat(OutputFormat outputFormat) {
+        return outputFormat != null ? outputFormat : defaultOutputFormat;
+    }
+
+    private void validateResponseFormatAndTools(List<Tool> tools, OutputFormat outputFormat) {
+        if (outputFormat == OutputFormat.JSON_OBJECT && tools != null && !tools.isEmpty()) {
+            throw new IllegalArgumentException("启用 json_object 结构化输出时，不支持同时传入 tools");
+        }
     }
 
     private void addTools(ChatCompletionCreateParams.Builder builder, List<Tool> tools) {
@@ -144,12 +175,19 @@ public class DashscopeLLM implements LLM {
         }
     }
 
-    private ChatResult doChat(ChatCompletionCreateParams.Builder builder) {
+    private ChatResult doChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
         if (enableThinking) {
             builder.putAdditionalBodyProperty("enable_thinking", JsonValue.from(true));
             if (thinkingBudget != null) {
                 builder.putAdditionalBodyProperty("thinking_budget", JsonValue.from(thinkingBudget));
             }
+        }
+        if (outputFormat == OutputFormat.JSON_OBJECT) {
+            builder.responseFormat(
+                    ResponseFormatJsonObject.builder()
+                            .type(JsonValue.from(RESPONSE_FORMAT_JSON_OBJECT))
+                            .build()
+            );
         }
 
         ChatCompletion completion = client.chat().completions().create(builder.build());
@@ -160,13 +198,21 @@ public class DashscopeLLM implements LLM {
                     String content = choice.message().content().orElse("无响应");
                     JsonValue thinkingValue = choice.message()._additionalProperties().get("reasoning_content");
                     String thinking = thinkingValue != null
-                            ? thinkingValue.accept(new JsonValue.Visitor<String>() {
+                            ? thinkingValue.accept(new JsonValue.Visitor<>() {
                         @Override
-                        public String visitString(String value) { return value; }
+                        public String visitString(@NotNull String value) {
+                            return value;
+                        }
+
                         @Override
-                        public String visitNull() { return null; }
+                        public String visitNull() {
+                            return null;
+                        }
+
                         @Override
-                        public String visitDefault() { return null; }
+                        public String visitDefault() {
+                            return null;
+                        }
                     })
                             : null;
 
