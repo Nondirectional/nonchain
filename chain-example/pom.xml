@@ -1,0 +1,44 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.non</groupId>
+    <artifactId>nonchain</artifactId>
+    <version>0.0.3</version>
+  </parent>
+
+  <artifactId>chain-example</artifactId>
+  <name>chain-example</name>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.non</groupId>
+      <artifactId>chain</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.non</groupId>
+      <artifactId>chain-pgvector</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.non</groupId>
+      <artifactId>chain-elasticsearch</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- 增加 API 依赖 -->
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-dashscope</artifactId>
+      <version>0.30.0</version>
+    </dependency>
+    <dependency>
+      <groupId>dev.langchain4j</groupId>
+      <artifactId>langchain4j-ollama</artifactId>
+      <version>0.30.0</version>
+    </dependency>
+  </dependencies>
+</project>
