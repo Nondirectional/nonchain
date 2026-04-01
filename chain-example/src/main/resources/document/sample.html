@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head><title>NonChain 介绍</title></head>
+<body>
+<h1>NonChain 介绍</h1>
+<p>NonChain 是一个轻量级的 Java LLM 应用开发库。</p>
+
+<h2>核心特性</h2>
+<p>LLM Provider 抽象、Embedding 向量化、知识库存储与检索。</p>
+
+<h2>支持的格式</h2>
+<table>
+  <tr><th>格式</th><th>扩展名</th><th>依赖库</th></tr>
+  <tr><td>文本</td><td>.txt</td><td>无</td></tr>
+  <tr><td>Markdown</td><td>.md</td><td>commonmark</td></tr>
+  <tr><td>PDF</td><td>.pdf</td><td>PDFBox</td></tr>
+  <tr><td>Word</td><td>.docx</td><td>Apache POI</td></tr>
+  <tr><td>HTML</td><td>.html</td><td>jsoup</td></tr>
+</table>
+
+<h2>代码示例</h2>
+<pre><code class="language-java">
+DocumentReaders readers = new DocumentReaders()
+    .register(new TxtDocumentReader());
+ParsedDocument doc = readers.read(new File("example.txt"));
+</code></pre>
+
+</body>
+</html>

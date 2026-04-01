@@ -1,0 +1,7 @@
+NonChain 文档解析库介绍
+
+NonChain 是一个轻量级的 Java LLM 应用开发库。它提供了 LLM 提供商抽象、工具调用框架和图工作流引擎。
+
+核心特性包括：LLM Provider 抽象、Embedding 向量化、知识库存储与检索、Graph 工作流引擎。
+
+目前支持的知识库后端有 Pgvector 和 Elasticsearch，并提供了混合检索能力。
