@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.1.0] - 2026-04-02
+
+### 新增
+
+- 转为多模块 Maven 项目结构（chain、chain-document、chain-pgvector、chain-elasticsearch、chain-example）
+- `chain` 模块：`EmbeddingModel` 接口及 DashScope 实现
+- `chain-knowledge` 模块：知识库核心接口与值对象、pgvector 和 Elasticsearch 实现
+- `chain-document` 模块：文档解析核心抽象（`DocumentReader`、`Document`、`DocumentCleaner`）
+- 5 种文档 Reader 实现：TXT、Markdown、PDF、DOCX、HTML
+- 文档清洁管线，包含 8 种 `Cleanable` 实现
+- `OcrEngine` 接口及扫描版 PDF 检测，支持 RapidOCR 和 Tesseract 两种引擎
+- 知识库示例和文档 Reader/Cleaner 示例
+
+### 修复
+
+- 文档 Reader 示例改用 classpath 资源加载 PDF 和 DOCX 文件
+
 ## [0.0.3] - 2026-03-31
 
 ### 新增
