@@ -24,9 +24,14 @@ public class PdfDocumentReaderExample {
                 .register(new PdfDocumentReader());
 
         // 2. 读取 PDF 文件
-        InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/sample.pdf");
+
+        // 扫描件
+        InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/scanned.pdf");
         DocumentSource source = DocumentSource.of(is, "sample.pdf");
 
+        // 正常PDF
+//        InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/sample.pdf");
+//        DocumentSource source = DocumentSource.of(is, "sample.pdf");
         // 3. 解析文档
         ParsedDocument doc = readers.read(source);
 
@@ -36,6 +41,13 @@ public class PdfDocumentReaderExample {
         System.out.println("格式: " + doc.metadata().format());
         System.out.println("页数: " + doc.metadata().pageCount());
         System.out.println("元素数量: " + doc.elements().size());
+
+        // 扫描件检测
+        Object scanned = doc.metadata().attributes().get("scanned");
+        if (Boolean.TRUE.equals(scanned)) {
+            System.out.println("** 检测到扫描件 PDF **");
+            System.out.println("  提示: 可通过 PdfDocumentReader(OcrEngine) 注入 OCR 引擎提取文字");
+        }
         System.out.println();
 
         int textCount = 0;
