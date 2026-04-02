@@ -1,11 +1,6 @@
 package com.non.chain.example;
 
-import com.non.chain.document.DocumentElement;
-import com.non.chain.document.DocumentReaders;
-import com.non.chain.document.DocumentSource;
-import com.non.chain.document.ImageElement;
-import com.non.chain.document.ParsedDocument;
-import com.non.chain.document.TextElement;
+import com.non.chain.document.*;
 import com.non.chain.document.pdf.PdfDocumentReader;
 
 import java.io.File;
@@ -19,15 +14,16 @@ import java.io.InputStream;
 public class PdfDocumentReaderExample {
 
     public static void main(String[] args) throws Exception {
+        OcrEngine ocrEngine = new RapidOCREngine();
         // 1. 注册 Reader
         DocumentReaders readers = new DocumentReaders()
-                .register(new PdfDocumentReader());
+                .register(new PdfDocumentReader(ocrEngine));
 
         // 2. 读取 PDF 文件
 
         // 扫描件
         InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/scanned.pdf");
-        DocumentSource source = DocumentSource.of(is, "sample.pdf");
+        DocumentSource source = DocumentSource.of(is, "scanned.pdf");
 
         // 正常PDF
 //        InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/sample.pdf");
