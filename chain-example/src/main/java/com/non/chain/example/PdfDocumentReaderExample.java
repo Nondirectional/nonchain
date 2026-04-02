@@ -9,6 +9,7 @@ import com.non.chain.document.TextElement;
 import com.non.chain.document.pdf.PdfDocumentReader;
 
 import java.io.File;
+import java.io.InputStream;
 
 /**
  * 示例：使用 PdfDocumentReader 解析 PDF 文件，提取文本和嵌入图片。
@@ -22,9 +23,9 @@ public class PdfDocumentReaderExample {
         DocumentReaders readers = new DocumentReaders()
                 .register(new PdfDocumentReader());
 
-        // 2. 读取 PDF 文件（请替换为实际文件路径）
-        String filePath = "example.pdf";
-        DocumentSource source = DocumentSource.fromFile(new File(filePath));
+        // 2. 读取 PDF 文件
+        InputStream is = PdfDocumentReaderExample.class.getResourceAsStream("/document/sample.pdf");
+        DocumentSource source = DocumentSource.of(is, "sample.pdf");
 
         // 3. 解析文档
         ParsedDocument doc = readers.read(source);

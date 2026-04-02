@@ -11,6 +11,7 @@ import com.non.chain.document.TextElement;
 import com.non.chain.document.docx.DocxDocumentReader;
 
 import java.io.File;
+import java.io.InputStream;
 
 /**
  * 示例：使用 DocxDocumentReader 解析 DOCX 文件，提取文本、表格和嵌入图片。
@@ -24,9 +25,9 @@ public class DocxDocumentReaderExample {
         DocumentReaders readers = new DocumentReaders()
                 .register(new DocxDocumentReader());
 
-        // 2. 读取 DOCX 文件（请替换为实际文件路径）
-        String filePath = "example.docx";
-        DocumentSource source = DocumentSource.fromFile(new File(filePath));
+        // 2. 读取 DOCX 文件
+        InputStream is = DocxDocumentReaderExample.class.getResourceAsStream("/document/sample.docx");
+        DocumentSource source = DocumentSource.of(is, "sample.docx");
 
         // 3. 解析文档
         ParsedDocument doc = readers.read(source);
