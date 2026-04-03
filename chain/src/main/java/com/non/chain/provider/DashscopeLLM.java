@@ -1,8 +1,6 @@
 package com.non.chain.provider;
 
-import com.non.chain.ChatResult;
-import com.non.chain.Message;
-import com.non.chain.OutputFormat;
+import com.non.chain.*;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.openai.client.OpenAIClient;
@@ -115,7 +113,15 @@ public class DashscopeLLM implements LLM {
                     builder.addSystemMessage(msg.content());
                     break;
                 case "user":
-                    builder.addUserMessage(msg.content());
+                    if (msg.contentParts() != null && !msg.contentParts().isEmpty()) {
+                        builder.addUserMessageOfArrayOfContentParts(
+                                msg.contentParts().stream()
+                                        .map(this::toSdkContentPart)
+                                        .collect(Collectors.toList())
+                        );
+                    } else {
+                        builder.addUserMessage(msg.content());
+                    }
                     break;
                 case "assistant":
                     if (msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
@@ -155,6 +161,27 @@ public class DashscopeLLM implements LLM {
         validateResponseFormatAndTools(tools, resolvedOutputFormat);
         addTools(builder, tools);
         return doChat(builder, resolvedOutputFormat);
+    }
+
+    private ChatCompletionContentPart toSdkContentPart(ContentPart part) {
+        if (part instanceof TextPart) {
+            return ChatCompletionContentPart.ofText(
+                    ChatCompletionContentPartText.builder()
+                            .text(((TextPart) part).text())
+                            .type(JsonValue.from("text"))
+                            .build()
+            );
+        } else if (part instanceof ImageUrlPart) {
+            return ChatCompletionContentPart.ofImageUrl(
+                    ChatCompletionContentPartImage.builder()
+                            .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder()
+                                    .url(((ImageUrlPart) part).url())
+                                    .build())
+                            .type(JsonValue.from("image_url"))
+                            .build()
+            );
+        }
+        throw new IllegalArgumentException("不支持的内容类型: " + part.getClass().getSimpleName());
     }
 
     private OutputFormat resolveOutputFormat(OutputFormat outputFormat) {
