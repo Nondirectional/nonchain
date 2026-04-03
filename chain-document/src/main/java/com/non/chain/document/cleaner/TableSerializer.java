@@ -10,7 +10,7 @@ import java.util.stream.Collectors;
  * 表格序列化清洗器。
  * <p>
  * 将 {@link TableElement} 转换为可索引的纯文本格式（Markdown 表格语法），
- * 替换原始的 TableElement，使表格内容可被下游 TextSplitter 处理。
+ * 替换原始的 TableElement，使表格内容可被下游 DocumentSplitter 处理。
  * <p>
  * 非 TABLE 类型的元素原样传递。
  */
@@ -22,7 +22,7 @@ public class TableSerializer implements DocumentCleaner {
 
         for (DocumentElement element : document.elements()) {
             if (element instanceof TableElement) {
-                String serialized = serializeTable((TableElement) element);
+                String serialized = serialize((TableElement) element);
                 if (!serialized.isBlank()) {
                     result.add(TextElement.builder(serialized)
                             .position(element.position())
@@ -39,7 +39,7 @@ public class TableSerializer implements DocumentCleaner {
                 .build();
     }
 
-    private String serializeTable(TableElement table) {
+    public static String serialize(TableElement table) {
         List<String> headers = table.headers();
         List<List<String>> rows = table.rows();
 
