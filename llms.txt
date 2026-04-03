@@ -1,0 +1,68 @@
+# Nonchain - Lightweight Java AI Application Framework
+
+> A lightweight Java framework providing LLM invocation, tool functions, workflow orchestration, document processing, and knowledge retrieval capabilities. Built for developers who want to build AI applications with minimal boilerplate.
+
+## Table of Contents
+
+### Overview
+
+- [Introduction](docs/overview/introduction.md): A lightweight Java AI application framework with LLM abstraction, tool calling, graph workflow, document processing, and knowledge retrieval.
+- [Getting Started](docs/overview/getting-started.md): Clone the repo, install with Maven, and add dependencies. Requires Java 11+ and Maven 3.6+.
+- [Installation](docs/overview/installation.md): `git clone` and `mvn install -DskipTests`. Add Maven dependencies for core, document, elasticsearch, or pgvector modules.
+- [Architecture](docs/overview/architecture.md): Layered architecture — LLM Provider, Tool Framework, Graph Engine, Embedding, KnowledgeStore interface, DocumentReader pipeline.
+
+### LLM Provider
+
+- [Message 消息模型](docs/llm/message.md): Chat message with role, content, multimodal content parts, tool call ID, and tool calls. Static factories: system(), user(), assistant(), assistantWithToolCalls(), toolResult(). Includes ContentPart, TextPart, ImageUrlPart, ChatResult, OutputFormat.
+- [DashscopeLLM](docs/llm/dashscope-llm.md): Alibaba Cloud DashScope implementation via OpenAI-compatible API. Supports multimodal input, tool calling, thinking/reasoning, and JSON structured output.
+- [多模态输入](docs/llm/multimodal.md): Text + image mixed messages with ContentPart interface. Supports vision models like qwen-vl-plus.
+- [结构化输出](docs/llm/structured-output.md): JSON Object structured output mode using OutputFormat enum. Use cases: data extraction, classification, configuration generation.
+
+### Tool Framework
+
+- [注解方式定义工具](docs/tool/annotation.md): @ToolDef and @ToolParam annotations for marking methods as LLM-callable tools. Annotation scanning via ToolRegistry.scan().
+- [流式 API 定义工具](docs/tool/fluent-api.md): Fluent API for tool definition using Tool.builder() and ToolRegistry.register(). Includes ToolHandler, ToolArgs type-safe accessors.
+- [ToolRegistry 工具注册中心](docs/tool/tool-registry.md): Central tool management. Supports annotation scanning and fluent API registration. Methods: getTools(), execute(), hasTool(). Complete tool calling loop with LLM.
+
+### Graph Workflow Engine
+
+- [图工作流引擎](docs/graph/workflow.md): Directed graph workflow with Graph, Node, Edge, State, GraphResult. Conditional routing, execution tracing. Includes RAG pipeline workflow example.
+
+### Embedding
+
+- [Embedding 向量模型](docs/embedding/model.md): EmbeddingModel interface and DashScopeEmbeddingModel implementation. Batch and single embedding, dimension probing.
+
+### Document Model
+
+- [文档模型](docs/document/model.md): DocumentReader interface, DocumentReaders registry, DocumentSource, ParsedDocument, DocumentElement hierarchy (Text, Heading, Image, Table, CodeBlock). OcrEngine with RapidOCR and Tesseract.
+
+### Document Readers
+
+- [文档解析器](docs/document/readers.md): 5 document readers — TxtDocumentReader, MarkdownDocumentReader, HtmlDocumentReader, DocxDocumentReader, PdfDocumentReader. Covers TXT, MD, HTML, DOCX, PDF formats.
+
+### Document Cleaners
+
+- [文档清洗管道](docs/document/cleaners.md): CleanerPipeline chains 8 cleaners — WhitespaceNormalizer, ControlCharacterRemover, UnicodeNormalizer, DuplicateRemover, ShortFragmentMerger, BoilerplateRemover, ImageStrategyCleaner, TableSerializer.
+
+### Document Splitters
+
+- [文档切分策略](docs/document/splitters.md): 4 splitting strategies — RecursiveCharacterSplitter (separator hierarchy), HeaderDocumentSplitter (heading levels), SemanticSplitter (embedding similarity), CompositeDocumentSplitter (two-stage). Includes CharacterMeasure and TokenMeasure.
+
+### Knowledge Store
+
+- [KnowledgeStore 知识存储](docs/knowledge/store.md): KnowledgeStore interface, KeywordRetriever interface, value objects (DocumentChunk, SearchRequest, SearchResult, SourceDocument, TextChunk). Typical knowledge base workflow.
+- [MetadataFilter 元数据过滤](docs/knowledge/metadata-filter.md): Composable metadata filter with CONDITION, AND, OR, NOT types and EQ, NE, GT, GTE, LT, LTE, IN, EXISTS operators.
+
+### PgVector
+
+- [PgVector 向量存储](docs/pgvector/store.md): PostgreSQL + pgvector implementation. Auto-creates database, table, ivfflat indexes. Full MetadataFilter support. HikariCP connection pooling.
+
+### Elasticsearch
+
+- [Elasticsearch 向量存储](docs/elasticsearch/store.md): Elasticsearch dense_vector + kNN implementation. Auto-creates index with configurable analyzer. Full MetadataFilter support.
+- [BM25 关键词检索](docs/elasticsearch/bm25.md): BM25 full-text search using match query. ElasticsearchBM25Retriever with configurable analyzer.
+- [混合检索](docs/elasticsearch/hybrid-retrieval.md): Dual-path hybrid retriever — vector + keyword search merged via Reciprocal Rank Fusion (RRF).
+
+### Examples
+
+- [示例代码](docs/examples/overview.md): 20 runnable examples in chain-example module — LLM calling, tool functions, workflow, embedding, vector stores, document processing, splitting strategies.
