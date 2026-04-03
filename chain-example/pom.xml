@@ -46,6 +46,13 @@
       <version>0.30.0</version>
     </dependency>
 
+    <!-- Tokenizer (optional in chain-document, needed for TokenMeasure example) -->
+    <dependency>
+      <groupId>com.knuddels</groupId>
+      <artifactId>jtokkit</artifactId>
+      <version>1.1.0</version>
+    </dependency>
+
     <!-- Document reader dependencies (optional in chain-document, needed for examples) -->
     <dependency>
       <groupId>org.commonmark</groupId>
