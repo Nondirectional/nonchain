@@ -4,6 +4,14 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.2.0] - 2026-04-03
+
+### 新增
+
+- 多模态图片输入支持（`ImageUrlPart`、`TextPart`），配合视觉模型进行图片理解
+- `ImageInputExample` 示例，演示多模态图片输入用法
+- `ParsedDocument` 和 `TextChunk` 单元测试
+
 ## [0.1.0] - 2026-04-02
 
 ### 新增

@@ -7,7 +7,9 @@
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，已支持阿里云 DashScope
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由
+- **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
+- **文档切分** — 4 种切分策略：递归字符、标题层级、语义、组合切分
 - **向量存储** — PgVector / Elasticsearch 实现，支持元数据过滤
 - **混合检索** — 向量搜索 + BM25 关键词检索，RRF 融合排序
 - **结构化输出** — 支持 JSON Object 响应格式
@@ -35,7 +37,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.0.3</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -45,7 +47,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.0.3</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -55,7 +57,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.0.3</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -65,7 +67,7 @@ PgVector 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-pgvector</artifactId>
-    <version>0.0.3</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -78,6 +80,20 @@ LLM llm = new DashscopeLLM("your-api-key", "qwen-plus");
 // 简单对话
 ChatResult result = llm.chat("你是一个助手", "你好");
 System.out.println(result.getContent());
+```
+
+### 多模态图片输入
+
+```java
+LLM llm = new DashscopeLLM("qwen-vl-plus");
+
+Message userMessage = Message.user(Arrays.asList(
+        ImageUrlPart.of("https://example.com/image.jpg"),
+        TextPart.of("图片中有什么？")
+));
+
+ChatResult result = llm.chat(Arrays.asList(userMessage));
+System.out.println(result.content());
 ```
 
 ### 工具函数调用
@@ -170,6 +186,49 @@ CleanerPipeline pipeline = CleanerPipeline.of(
 ParsedDocument cleaned = pipeline.clean(doc);
 ```
 
+### 文档切分
+
+提供 4 种切分策略，适用于不同的文档处理场景：
+
+**递归字符切分** — 按分隔符层级递归切分，支持字符数和 Token 数度量：
+
+```java
+RecursiveCharacterSplitter splitter = RecursiveCharacterSplitter.builder()
+        .chunkSize(500)
+        .chunkOverlap(50)
+        .build();
+
+List<TextChunk> chunks = splitter.split(document);
+```
+
+**标题层级切分** — 基于 Markdown 标题按文档结构拆分：
+
+```java
+HeaderDocumentSplitter splitter = new HeaderDocumentSplitter(
+        List.of(1, 2),  // 在 H1 和 H2 处切分
+        true            // 将标题包含在内容中
+);
+```
+
+**语义切分** — 基于 Embedding 计算语义相似度，在话题切换处切分：
+
+```java
+SemanticSplitter splitter = SemanticSplitter.builder(embeddingModel)
+        .bufferSize(1)
+        .breakpointThreshold(0.5)
+        .maxChunkSize(1000)
+        .build();
+```
+
+**组合切分** — 先按结构切分，再对每个 chunk 二次细分：
+
+```java
+CompositeDocumentSplitter splitter = new CompositeDocumentSplitter(
+        new HeaderDocumentSplitter(List.of(1)),
+        RecursiveCharacterSplitter.builder().chunkSize(300).build()
+);
+```
+
 ### 向量存储与检索
 
 **PgVector：**
@@ -210,11 +269,11 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 
 | 模块 | 说明 |
 |------|------|
-| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、知识存储接口、文档模型、Embedding |
-| `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 |
+| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、知识存储接口、文档模型、Embedding、多模态消息 |
+| `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 4 种文档切分策略 |
 | `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、混合检索（RRF） |
 | `chain-pgvector` | PgVector 向量存储 |
-| `chain-example` | 示例代码（15 个可运行的 Demo） |
+| `chain-example` | 示例代码（20 个可运行的 Demo） |
 
 ## 架构
 
@@ -234,9 +293,9 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
               │                       │
      ┌────────┴────────┐    ┌────────┴────────┐
      │ KnowledgeStore  │    │  DocumentReader │
-     │   (interface)   │    │   + 清洗管道     │
-     └────────┬────────┘    └─────────────────┘
-              │
+     │   (interface)   │    │ + 清洗管道       │
+     └────────┬────────┘    │ + 文档切分       │
+              │             └─────────────────┘
      ┌────────┼────────┐
      │                 │
  PgVector        Elasticsearch
@@ -245,7 +304,7 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 
 ## 示例
 
-`chain-example` 模块包含 15 个可运行的示例：
+`chain-example` 模块包含 20 个可运行的示例：
 
 | 示例 | 说明 |
 |------|------|
@@ -253,6 +312,7 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 | `FunctionCallRawExample` | 流式 API 工具调用 |
 | `FunctionCallMultiParamExample` | 多参数工具：注解 vs 流式对比 |
 | `StructuredOutputExample` | JSON Object 结构化输出 |
+| `ImageInputExample` | 多模态图片输入 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |
@@ -264,6 +324,10 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 | `DocxDocumentReaderExample` | Word 文档解析 |
 | `PdfDocumentReaderExample` | PDF 解析 + OCR |
 | `DocumentCleanerExample` | 文档清洗管道 |
+| `RecursiveCharacterSplitterExample` | 递归字符切分（字符数 / Token 数） |
+| `HeaderDocumentSplitterExample` | 标题层级切分 |
+| `CompositeDocumentSplitterExample` | 组合切分（标题 + 字符） |
+| `SemanticSplitterExample` | 语义切分（基于 Embedding） |
 
 运行示例前需设置环境变量：
 
