@@ -4,6 +4,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.3.0] - 2026-04-07
+
+### 新增
+
+- 流式输出支持：`LLM` 接口新增 `streamChat()` 系列方法，接受 `Consumer<ChatChunk>` 回调
+- `ChatChunk` 增量块模型：支持文本、思考内容、工具调用的流式片段
+- `DashscopeLLM` 流式实现：基于 `createStreaming()` API，含工具调用按 index 累积
+- `StreamingChatExample` 示例：基础流式、思考模式、工具调用流式
+- Agent 循环：`Agent` 类封装 LLM + 工具自动调用循环，Builder 模式
+- `AgentException`：超出最大迭代次数时抛出
+- 工具执行失败时错误信息传回 LLM 自我修复，不中断循环
+- Agent 支持 `Consumer<String>` 日志回调，可观察执行过程
+- `AgentTest`：8 个单元测试覆盖核心场景
+- `AgentLoopExample`：旅行助手示例，演示多工具多步骤推理
+
 ## [0.2.0] - 2026-04-03
 
 ### 新增

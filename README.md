@@ -5,7 +5,9 @@
 ## 特性
 
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，已支持阿里云 DashScope
+- **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
+- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持日志回调
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
@@ -37,7 +39,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -47,7 +49,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -57,7 +59,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -67,7 +69,7 @@ PgVector 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-pgvector</artifactId>
-    <version>0.2.0</version>
+    <version>0.3.0</version>
 </dependency>
 ```
 
@@ -130,6 +132,24 @@ ToolRegistry registry = new ToolRegistry();
 registry.register("get_weather", "获取城市天气")
         .param("city", "城市名称")
         .handle(args -> args.getString("city") + ": 晴, 25°C");
+```
+
+### Agent 自动调用
+
+```java
+// 注册工具
+ToolRegistry registry = new ToolRegistry().scan(new WeatherService());
+
+// 构建 Agent
+Agent agent = Agent.builder(llm, registry)
+        .systemPrompt("你是一个旅行助手")
+        .maxIterations(5)
+        .logger(System.out::println)   // 可选：观察执行过程
+        .build();
+
+// 一行搞定：自动循环调用工具直到完成
+ChatResult result = agent.run("北京和上海天气怎么样？");
+System.out.println(result.content());
 ```
 
 ### 工作流编排
@@ -287,7 +307,12 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
         ┌─────┴─────┐ ┌───┴───┐ ┌─────┴─────┐
         │ Tool 框架  │ │ Graph │ │ Embedding │
         │ Registry  │ │ 引擎  │ │  Model    │
-        └───────────┘ └───┬───┘ └───────────┘
+        └─────┬─────┘ └───┬───┘ └───────────┘
+              │             │
+         ┌────┴────┐       │
+         │  Agent  │       │
+         │  Loop   │       │
+         └─────────┘       │
                           │
               ┌───────────┼───────────┐
               │                       │
@@ -304,7 +329,7 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 
 ## 示例
 
-`chain-example` 模块包含 20 个可运行的示例：
+`chain-example` 模块包含 22 个可运行的示例：
 
 | 示例 | 说明 |
 |------|------|
@@ -313,6 +338,8 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 | `FunctionCallMultiParamExample` | 多参数工具：注解 vs 流式对比 |
 | `StructuredOutputExample` | JSON Object 结构化输出 |
 | `ImageInputExample` | 多模态图片输入 |
+| `StreamingChatExample` | 流式输出：基础流式、思考模式、工具调用 |
+| `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |
