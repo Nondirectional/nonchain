@@ -1,0 +1,264 @@
+package com.non.chain.agent;
+
+import com.non.chain.ChatResult;
+import com.non.chain.Message;
+import com.non.chain.provider.LLM;
+import com.non.chain.tool.ToolCall;
+import com.non.chain.tool.ToolRegistry;
+import org.junit.Test;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import static org.junit.Assert.*;
+
+public class AgentTest {
+
+    // ---- 测试用 mock LLM ----
+
+    /**
+     * 可编程的 mock LLM，按预设顺序返回结果
+     */
+    static class MockLLM implements LLM {
+
+        private final List<ChatResult> responses;
+        private int callIndex = 0;
+        private List<List<Message>> capturedMessages = new ArrayList<>();
+
+        MockLLM(List<ChatResult> responses) {
+            this.responses = responses;
+        }
+
+        @Override
+        public ChatResult chat(String systemMessage, String userMessage, com.non.chain.OutputFormat outputFormat) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult chat(List<Message> messages, com.non.chain.OutputFormat outputFormat) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult chat(String systemMessage, String userMessage, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult chat(List<Message> messages, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat) {
+            capturedMessages.add(new ArrayList<>(messages));
+            return responses.get(callIndex++);
+        }
+
+        @Override
+        public ChatResult streamChat(String systemMessage, String userMessage, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<com.non.chain.ChatChunk> callback) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult streamChat(List<Message> messages, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<com.non.chain.ChatChunk> callback) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult streamChat(String systemMessage, String userMessage, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<com.non.chain.ChatChunk> callback) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ChatResult streamChat(List<Message> messages, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<com.non.chain.ChatChunk> callback) {
+            throw new UnsupportedOperationException();
+        }
+
+        List<List<Message>> getCapturedMessages() {
+            return capturedMessages;
+        }
+    }
+
+    // ---- 测试 ----
+
+    @Test
+    public void testDirectResponseWithoutToolCalls() {
+        // LLM 直接回复，不调用工具
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("北京今天是晴天", null)
+        ));
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("北京天气");
+
+        assertEquals("北京今天是晴天", result.content());
+        assertFalse(result.hasToolCalls());
+    }
+
+    @Test
+    public void testSingleToolCallLoop() {
+        // 第一轮：LLM 调用工具；第二轮：LLM 根据工具结果回复
+        ToolCall toolCall = new ToolCall("call_1", "get_weather", "{\"location\":\"北京\"}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
+        responses.add(new ChatResult("北京今天是晴天，气温25°C", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("get_weather", "查询天气")
+                .handle(args -> args.getString("location") + "今天是晴天，气温25°C");
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("北京天气");
+
+        assertEquals("北京今天是晴天，气温25°C", result.content());
+
+        // 验证 LLM 被调用了两次
+        assertEquals(2, llm.getCapturedMessages().size());
+
+        // 第二次调用时，消息历史应包含：user, assistant(toolCall), tool_result
+        List<Message> secondCallMessages = llm.getCapturedMessages().get(1);
+        assertEquals(3, secondCallMessages.size());
+        assertEquals("user", secondCallMessages.get(0).role());
+        assertEquals("assistant", secondCallMessages.get(1).role());
+        assertTrue(secondCallMessages.get(1).toolCalls().size() > 0);
+        assertEquals("tool", secondCallMessages.get(2).role());
+        assertEquals("call_1", secondCallMessages.get(2).toolCallId());
+    }
+
+    @Test
+    public void testMultipleToolCallsInOneIteration() {
+        // 一轮中 LLM 同时调用多个工具
+        ToolCall tc1 = new ToolCall("call_1", "get_weather", "{\"location\":\"北京\"}");
+        ToolCall tc2 = new ToolCall("call_2", "get_weather", "{\"location\":\"上海\"}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, List.of(tc1, tc2)));
+        responses.add(new ChatResult("北京和上海都是晴天", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("get_weather", "查询天气")
+                .handle(args -> args.getString("location") + "晴天");
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("北京和上海天气");
+
+        assertEquals("北京和上海都是晴天", result.content());
+    }
+
+    @Test
+    public void testMaxIterationsExceeded() {
+        // LLM 一直调用工具，触发最大迭代限制
+        ToolCall toolCall = new ToolCall("call_1", "search", "{\"q\":\"test\"}");
+        List<ChatResult> endlessResponses = new ArrayList<>();
+        for (int i = 0; i < 20; i++) {
+            endlessResponses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
+        }
+
+        MockLLM llm = new MockLLM(endlessResponses);
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("search", "搜索")
+                .handle(args -> "搜索结果");
+
+        Agent agent = Agent.builder(llm, registry)
+                .maxIterations(3)
+                .build();
+
+        try {
+            agent.run("无限循环测试");
+            fail("应抛出 AgentException");
+        } catch (AgentException e) {
+            assertTrue(e.getMessage().contains("超出最大迭代次数"));
+            assertTrue(e.getMessage().contains("3"));
+        }
+    }
+
+    @Test
+    public void testToolExecutionErrorPassedToLLM() {
+        // 工具执行失败，错误信息传回 LLM，LLM 回复
+        ToolCall toolCall = new ToolCall("call_1", "failing_tool", "{}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
+        responses.add(new ChatResult("工具出错了，不过没关系", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("failing_tool", "会失败的工具")
+                .handle(args -> {
+                    throw new RuntimeException("连接超时");
+                });
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("测试失败工具");
+
+        assertEquals("工具出错了，不过没关系", result.content());
+
+        // 第二轮消息中应包含工具错误信息
+        List<Message> secondCallMessages = llm.getCapturedMessages().get(1);
+        Message toolResultMsg = secondCallMessages.get(2);
+        assertEquals("tool", toolResultMsg.role());
+        assertTrue(toolResultMsg.content().contains("工具执行失败"));
+        assertTrue(toolResultMsg.content().contains("连接超时"));
+    }
+
+    @Test
+    public void testSystemPromptIncluded() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("回复", null)
+        ));
+
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry)
+                .systemPrompt("你是助手")
+                .build();
+        agent.run("你好");
+
+        List<Message> firstCall = llm.getCapturedMessages().get(0);
+        assertEquals(2, firstCall.size());
+        assertEquals("system", firstCall.get(0).role());
+        assertEquals("你是助手", firstCall.get(0).content());
+        assertEquals("user", firstCall.get(1).role());
+    }
+
+    @Test
+    public void testRunWithMessageList() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("回复", null)
+        ));
+
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry).build();
+
+        List<Message> messages = new ArrayList<>();
+        messages.add(Message.user("第一条消息"));
+        messages.add(Message.assistant("之前的回复"));
+        messages.add(Message.user("继续对话"));
+
+        ChatResult result = agent.run(messages);
+        assertEquals("回复", result.content());
+
+        List<Message> captured = llm.getCapturedMessages().get(0);
+        assertEquals(3, captured.size());
+    }
+
+    @Test
+    public void testBuilderDefaults() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("ok", null)
+        ));
+
+        ToolRegistry registry = new ToolRegistry();
+        Agent agent = Agent.builder(llm, registry).build();
+
+        // 不抛异常即可验证默认值正常
+        ChatResult result = agent.run("test");
+        assertEquals("ok", result.content());
+    }
+}
