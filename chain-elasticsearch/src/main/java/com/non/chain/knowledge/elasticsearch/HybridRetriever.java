@@ -1,139 +1,245 @@
 package com.non.chain.knowledge.elasticsearch;
 
-import com.non.chain.knowledge.KeywordRetriever;
-import com.non.chain.knowledge.KnowledgeStore;
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.ElasticsearchException;
+import co.elastic.clients.elasticsearch._types.KnnSearch;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.elasticsearch.core.search.Hit;
+import com.non.chain.knowledge.FusionStrategy;
+import com.non.chain.knowledge.RetrievalMode;
+import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
 
+import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * 双路混合检索器：向量检索（KnowledgeStore）+ 关键词检索（KeywordRetriever），
- * 通过 RRF（Reciprocal Rank Fusion）融合排序结果。
- *
- * <p>RRF 公式：score(d) = Σ 1 / (k + rank_i(d))，默认 k=60。
- *
- * <p>用法：
- * <pre>{@code
- * HybridRetriever retriever = HybridRetriever.builder(vectorStore, bm25Retriever)
- *         .rrfK(60)
- *         .build();
- *
- * List<SearchResult> results = retriever.search(queryEmbedding, queryText, 10,
- *         List.of("kb1"), List.of());
- * }</pre>
+ * 客户端侧混合检索器。
+ * 分别执行 BM25 和 kNN 查询，然后在 Java 侧进行融合（RRF 或 Linear）。
  */
 public class HybridRetriever {
 
-    private final KnowledgeStore vectorStore;
-    private final KeywordRetriever keywordRetriever;
-    private final int rrfK;
+    private static final int RANK_CONSTANT = 60;
+
+    private final ElasticsearchClient client;
+    private final String indexName;
+    private final ElasticsearchSearchSupport support;
 
     private HybridRetriever(Builder builder) {
-        this.vectorStore = builder.vectorStore;
-        this.keywordRetriever = builder.keywordRetriever;
-        this.rrfK = builder.rrfK;
+        this.client = builder.client;
+        this.indexName = builder.indexName;
+        this.support = new ElasticsearchSearchSupport(builder.client, ElasticsearchSearchSupport.DEFAULT_ANALYZER);
+    }
+
+    public RetrievalResponse search(SearchRequest request) {
+        if (request.mode() != RetrievalMode.HYBRID) {
+            throw new IllegalArgumentException("HybridRetriever 需要同时提供 queryText 和 queryEmbedding");
+        }
+
+        long startMs = System.currentTimeMillis();
+
+        Query filter = support.buildFilter(request);
+
+        List<SearchResult> bm25Results = executeBM25(request, filter);
+        List<SearchResult> knnResults = executeKnn(request, filter);
+
+        List<SearchResult> fused;
+        List<String> matchedRetrievers;
+        if (request.fusionStrategy() == FusionStrategy.LINEAR) {
+            fused = linearFusion(bm25Results, knnResults, request);
+            matchedRetrievers = List.of("linear", "standard", "knn");
+        } else {
+            fused = rrfFusion(bm25Results, knnResults, request.size());
+            matchedRetrievers = List.of("rrf", "standard", "knn");
+        }
+
+        long tookMs = System.currentTimeMillis() - startMs;
+
+        return support.buildResponse(
+                request, RetrievalMode.HYBRID, fused, tookMs, false, matchedRetrievers
+        );
+    }
+
+    private List<SearchResult> executeBM25(SearchRequest request, Query filter) {
+        Query query = support.combineQueryAndFilter(
+                support.buildMatchQuery(request.queryText()),
+                filter
+        );
+
+        try {
+            SearchResponse<Map> response = client.search(
+                    s -> s.index(indexName)
+                            .query(query)
+                            .size(request.rankWindowSize())
+                            .profile(request.trace()),
+                    Map.class
+            );
+            return toResults(response);
+        } catch (ElasticsearchException e) {
+            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
+                return List.of();
+            }
+            throw new RuntimeException("Elasticsearch BM25 检索失败", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Elasticsearch BM25 检索失败", e);
+        }
+    }
+
+    private List<SearchResult> executeKnn(SearchRequest request, Query filter) {
+        KnnSearch.Builder knnBuilder = new KnnSearch.Builder()
+                .field(ElasticsearchSearchSupport.FIELD_EMBEDDING)
+                .queryVector(support.toQueryVector(request.queryEmbedding()))
+                .k((long) request.rankWindowSize())
+                .numCandidates((long) request.numCandidates());
+        if (filter != null) {
+            knnBuilder.filter(filter);
+        }
+
+        try {
+            SearchResponse<Map> response = client.search(
+                    s -> s.index(indexName)
+                            .knn(knnBuilder.build())
+                            .size(request.rankWindowSize())
+                            .profile(request.trace()),
+                    Map.class
+            );
+            return toResults(response);
+        } catch (ElasticsearchException e) {
+            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
+                return List.of();
+            }
+            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<SearchResult> toResults(SearchResponse<Map> response) {
+        List<SearchResult> results = new ArrayList<>();
+        for (Hit<Map> hit : response.hits().hits()) {
+            Map<String, Object> source = hit.source();
+            double score = hit.score() != null ? hit.score() : 0.0;
+            results.add(support.toSearchResult(source != null ? source : Map.of(), score));
+        }
+        return results;
     }
 
     /**
-     * 双路检索并 RRF 融合。
-     *
-     * @param queryEmbedding  查询向量（用于向量路径）
-     * @param queryText       查询文本（用于 BM25 路径）
-     * @param topK            最终返回条数
-     * @param knowledgeBaseIds 限定知识库（空 = 不限）
-     * @param documentIds      限定文档（空 = 不限）
-     * @return 按 RRF 分数降序排列的结果列表
+     * RRF 融合：score(d) = Σ 1/(rank_constant + rank_i)
      */
-    public List<SearchResult> search(
-            float[] queryEmbedding,
-            String queryText,
-            int topK,
-            List<String> knowledgeBaseIds,
-            List<String> documentIds
-    ) {
-        int candidateSize = topK * 3;
+    private List<SearchResult> rrfFusion(List<SearchResult> bm25Results, List<SearchResult> knnResults, int size) {
+        Map<String, Double> scores = new LinkedHashMap<>();
+        Map<String, SearchResult> resultByChunkId = new LinkedHashMap<>();
 
-        // 向量路径
-        SearchRequest vectorRequest = SearchRequest.builder(queryEmbedding)
-                .topK(candidateSize)
-                .knowledgeBaseIds(knowledgeBaseIds)
-                .documentIds(documentIds)
-                .build();
-        List<SearchResult> vectorResults = vectorStore.search(vectorRequest);
-
-        // 关键词路径
-        List<SearchResult> keywordResults = keywordRetriever.search(queryText, candidateSize);
-
-        return rrf(vectorResults, keywordResults, topK);
-    }
-
-    private List<SearchResult> rrf(List<SearchResult> vectorResults, List<SearchResult> keywordResults, int topK) {
-        // chunkId -> rrf 累计分
-        Map<String, Double> scoreMap = new HashMap<>();
-        // chunkId -> SearchResult（保留向量路径结果优先，用于构造最终结果）
-        Map<String, SearchResult> resultMap = new LinkedHashMap<>();
-
-        accumulateRrf(vectorResults, scoreMap, resultMap);
-        accumulateRrf(keywordResults, scoreMap, resultMap);
-
-        // 按 RRF 分数降序排序，截取 topK
-        return scoreMap.entrySet().stream()
-                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                .limit(topK)
-                .map(e -> {
-                    SearchResult original = resultMap.get(e.getKey());
-                    // 用 RRF 融合分数替换原始分数
-                    return SearchResult.builder(
-                            original.knowledgeBaseId(),
-                            original.documentId(),
-                            original.chunkId(),
-                            original.content(),
-                            e.getValue()
-                    ).metadata(original.metadata()).chunkIndex(original.chunkIndex()).build();
-                })
-                .collect(java.util.stream.Collectors.toList());
-    }
-
-    private void accumulateRrf(
-            List<SearchResult> results,
-            Map<String, Double> scoreMap,
-            Map<String, SearchResult> resultMap
-    ) {
-        for (int i = 0; i < results.size(); i++) {
-            SearchResult r = results.get(i);
-            String id = r.chunkId();
-            double rrfScore = 1.0 / (rrfK + i + 1);
-            scoreMap.merge(id, rrfScore, Double::sum);
-            resultMap.putIfAbsent(id, r);
+        for (int i = 0; i < bm25Results.size(); i++) {
+            String chunkId = bm25Results.get(i).chunkId();
+            scores.merge(chunkId, 1.0 / (RANK_CONSTANT + i + 1), Double::sum);
+            resultByChunkId.putIfAbsent(chunkId, bm25Results.get(i));
         }
+
+        for (int i = 0; i < knnResults.size(); i++) {
+            String chunkId = knnResults.get(i).chunkId();
+            scores.merge(chunkId, 1.0 / (RANK_CONSTANT + i + 1), Double::sum);
+            resultByChunkId.putIfAbsent(chunkId, knnResults.get(i));
+        }
+
+        return scores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(size)
+                .map(entry -> rebuildWithScore(resultByChunkId.get(entry.getKey()), entry.getValue()))
+                .collect(Collectors.toList());
     }
 
-    public static Builder builder(KnowledgeStore vectorStore, KeywordRetriever keywordRetriever) {
-        return new Builder(vectorStore, keywordRetriever);
+    /**
+     * Linear 融合：score = keywordWeight * norm_bm25 + vectorWeight * norm_knn
+     * 使用 min-max 归一化。
+     */
+    private List<SearchResult> linearFusion(List<SearchResult> bm25Results, List<SearchResult> knnResults, SearchRequest request) {
+        Map<String, Double> bm25Scores = new LinkedHashMap<>();
+        Map<String, Double> knnScores = new LinkedHashMap<>();
+        Map<String, SearchResult> resultByChunkId = new LinkedHashMap<>();
+
+        for (SearchResult r : bm25Results) {
+            bm25Scores.put(r.chunkId(), r.score());
+            resultByChunkId.putIfAbsent(r.chunkId(), r);
+        }
+        for (SearchResult r : knnResults) {
+            knnScores.put(r.chunkId(), r.score());
+            resultByChunkId.putIfAbsent(r.chunkId(), r);
+        }
+
+        double bm25Min = bm25Scores.values().stream().mapToDouble(Double::doubleValue).min().orElse(0);
+        double bm25Max = bm25Scores.values().stream().mapToDouble(Double::doubleValue).max().orElse(1);
+        double knnMin = knnScores.values().stream().mapToDouble(Double::doubleValue).min().orElse(0);
+        double knnMax = knnScores.values().stream().mapToDouble(Double::doubleValue).max().orElse(1);
+        double bm25Range = bm25Max - bm25Min;
+        double knnRange = knnMax - knnMin;
+
+        Set<String> allChunkIds = new LinkedHashSet<>();
+        allChunkIds.addAll(bm25Scores.keySet());
+        allChunkIds.addAll(knnScores.keySet());
+
+        Map<String, Double> fusedScores = new LinkedHashMap<>();
+        for (String chunkId : allChunkIds) {
+            double score = 0;
+            if (bm25Scores.containsKey(chunkId)) {
+                double normalized = bm25Range > 0 ? (bm25Scores.get(chunkId) - bm25Min) / bm25Range : 0;
+                score += request.keywordWeight() * normalized;
+            }
+            if (knnScores.containsKey(chunkId)) {
+                double normalized = knnRange > 0 ? (knnScores.get(chunkId) - knnMin) / knnRange : 0;
+                score += request.vectorWeight() * normalized;
+            }
+            fusedScores.put(chunkId, score);
+        }
+
+        return fusedScores.entrySet().stream()
+                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                .limit(request.size())
+                .map(entry -> rebuildWithScore(resultByChunkId.get(entry.getKey()), entry.getValue()))
+                .collect(Collectors.toList());
+    }
+
+    private SearchResult rebuildWithScore(SearchResult original, double newScore) {
+        return SearchResult.builder(
+                original.knowledgeBaseId(),
+                original.documentId(),
+                original.chunkId(),
+                original.content(),
+                newScore
+        ).metadata(original.metadata()).chunkIndex(original.chunkIndex()).build();
+    }
+
+    public static Builder builder(ElasticsearchClient client) {
+        return new Builder(client);
     }
 
     public static class Builder {
-        private final KnowledgeStore vectorStore;
-        private final KeywordRetriever keywordRetriever;
-        private int rrfK = 60;
+        private final ElasticsearchClient client;
+        private String indexName = "knowledge_chunks";
 
-        private Builder(KnowledgeStore vectorStore, KeywordRetriever keywordRetriever) {
-            this.vectorStore = vectorStore;
-            this.keywordRetriever = keywordRetriever;
+        private Builder(ElasticsearchClient client) {
+            this.client = client;
         }
 
-        public Builder rrfK(int rrfK) {
-            if (rrfK <= 0) throw new IllegalArgumentException("rrfK 必须大于 0");
-            this.rrfK = rrfK;
+        public Builder indexName(String indexName) {
+            this.indexName = indexName;
             return this;
         }
 
         public HybridRetriever build() {
+            if (indexName == null || indexName.isBlank()) {
+                throw new IllegalArgumentException("indexName 不能为空");
+            }
             return new HybridRetriever(this);
         }
     }

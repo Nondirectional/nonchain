@@ -2,6 +2,7 @@ package com.non.chain.knowledge.elasticsearch;
 
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
+import co.elastic.clients.elasticsearch._types.KnnSearch;
 import co.elastic.clients.elasticsearch._types.mapping.DenseVectorProperty;
 import co.elastic.clients.elasticsearch._types.mapping.KeywordProperty;
 import co.elastic.clients.elasticsearch._types.mapping.ObjectProperty;
@@ -14,12 +15,12 @@ import co.elastic.clients.elasticsearch.core.bulk.BulkOperation;
 import co.elastic.clients.elasticsearch.core.bulk.DeleteOperation;
 import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
 import co.elastic.clients.elasticsearch.core.search.Hit;
-import co.elastic.clients.elasticsearch._types.KnnSearch;
 import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
 import com.non.chain.knowledge.DocumentChunk;
 import com.non.chain.knowledge.KnowledgeStore;
-import com.non.chain.knowledge.MetadataFilter;
+import com.non.chain.knowledge.RetrievalMode;
+import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
 
@@ -32,49 +33,23 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * 基于 Elasticsearch dense_vector + kNN 的 KnowledgeStore 实现。
- * <p>
- * 所有 chunk 写入同一个索引，knowledgeBaseId 作为过滤字段。
- * <p>
- * 索引结构：
- * <pre>
- * {
- *   "chunk_id":          keyword
- *   "document_id":       keyword
- *   "knowledge_base_id": keyword
- *   "content":           text (analyzer 可配置，默认 ik_smart)
- *   "embedding":         dense_vector (dims, similarity=cosine)
- *   "chunk_index":       integer
- *   "metadata":          object (dynamic)
- * }
- * </pre>
+ * 基于 Elasticsearch 的统一 KnowledgeStore 实现。
+ * 支持 BM25、kNN 以及原生 retriever 驱动的混合检索。
  */
 public class ElasticsearchKnowledgeStore implements KnowledgeStore {
-
-    private static final String FIELD_CHUNK_ID = "chunk_id";
-    private static final String FIELD_DOCUMENT_ID = "document_id";
-    private static final String FIELD_KNOWLEDGE_BASE_ID = "knowledge_base_id";
-    private static final String FIELD_CONTENT = "content";
-    private static final String FIELD_EMBEDDING = "embedding";
-    private static final String FIELD_CHUNK_INDEX = "chunk_index";
-    private static final String FIELD_METADATA = "metadata";
 
     private final ElasticsearchClient client;
     private final String indexName;
     private final int dims;
-    private final String analyzer;
+    private final ElasticsearchSearchSupport support;
 
     private ElasticsearchKnowledgeStore(Builder builder) {
         this.client = builder.client;
         this.indexName = builder.indexName;
         this.dims = builder.dims;
-        this.analyzer = builder.analyzer;
+        this.support = new ElasticsearchSearchSupport(builder.client, ElasticsearchSearchSupport.DEFAULT_ANALYZER);
         ensureIndexExists();
     }
-
-    // -------------------------------------------------------------------------
-    // KnowledgeStore
-    // -------------------------------------------------------------------------
 
     @Override
     public String add(DocumentChunk chunk) {
@@ -93,70 +68,36 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         for (DocumentChunk chunk : chunks) {
             String chunkId = chunk.chunkId() != null ? chunk.chunkId() : UUID.randomUUID().toString();
             ids.add(chunkId);
-
-            Map<String, Object> doc = buildDocument(chunk, chunkId);
-
             ops.add(BulkOperation.of(b -> b.index(
-                    IndexOperation.of(i -> i.index(indexName).id(chunkId).document(doc))
+                    IndexOperation.of(i -> i.index(indexName).id(chunkId).document(buildDocument(chunk, chunkId)))
             )));
         }
 
         try {
-            BulkResponse resp = client.bulk(BulkRequest.of(b -> b.operations(ops)));
-            if (resp.errors()) {
-                String details = resp.items().stream()
-                        .filter(i -> i.error() != null)
-                        .map(i -> "文档 " + i.id() + ": [" + i.error().type() + "] " + i.error().reason())
+            BulkResponse response = client.bulk(BulkRequest.of(b -> b.operations(ops)));
+            if (response.errors()) {
+                String details = response.items().stream()
+                        .filter(item -> item.error() != null)
+                        .map(item -> "文档 " + item.id() + ": [" + item.error().type() + "] " + item.error().reason())
                         .collect(Collectors.joining("; "));
                 throw new RuntimeException("批量写入 Elasticsearch 时发生错误: " + details);
             }
+            return ids;
         } catch (IOException e) {
             throw new RuntimeException("写入 Elasticsearch 失败", e);
         }
-
-        return ids;
     }
 
     @Override
-    public List<SearchResult> search(SearchRequest request) {
-        float[] qe = request.queryEmbedding();
-        List<Float> queryVector = new ArrayList<>(qe.length);
-        for (float v : qe) queryVector.add(v);
-
-        Query filter = buildFilter(request);
-
-        KnnSearch.Builder knnBuilder = new KnnSearch.Builder()
-                .field(FIELD_EMBEDDING)
-                .queryVector(queryVector)
-                .numCandidates((long) request.topK() * 5)
-                .k((long) request.topK());
-        if (filter != null) {
-            knnBuilder.filter(filter);
-        }
-        KnnSearch knn = knnBuilder.build();
-
-        try {
-            SearchResponse<Map> resp = client.search(
-                    s -> s.index(indexName).knn(knn).size(request.topK()),
-                    Map.class
-            );
-
-            List<SearchResult> results = new ArrayList<>();
-            for (Hit<Map> hit : resp.hits().hits()) {
-                double score = hit.score() != null ? hit.score() : 0.0;
-                if (request.minScore() != null && score < request.minScore()) {
-                    continue;
-                }
-                results.add(toSearchResult(hit.source(), score));
-            }
-            return results;
-        } catch (ElasticsearchException e) {
-            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
-                return List.of();
-            }
-            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
-        } catch (IOException e) {
-            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
+    public RetrievalResponse search(SearchRequest request) {
+        switch (request.mode()) {
+            case BM25:
+                return createBM25Retriever().search(request);
+            case HYBRID:
+                return createHybridRetriever().search(request);
+            case KNN:
+            default:
+                return searchKnn(request);
         }
     }
 
@@ -167,7 +108,9 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
 
     @Override
     public void deleteAll(List<String> chunkIds) {
-        if (chunkIds == null || chunkIds.isEmpty()) return;
+        if (chunkIds == null || chunkIds.isEmpty()) {
+            return;
+        }
         List<BulkOperation> ops = chunkIds.stream()
                 .map(id -> BulkOperation.of(b -> b.delete(
                         DeleteOperation.of(d -> d.index(indexName).id(id))
@@ -185,37 +128,69 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         try {
             client.deleteByQuery(d -> d
                     .index(indexName)
-                    .query(q -> q.term(t -> t.field(FIELD_DOCUMENT_ID).value(documentId)))
+                    .query(q -> q.term(t -> t.field(ElasticsearchSearchSupport.FIELD_DOCUMENT_ID).value(documentId)))
             );
         } catch (IOException e) {
             throw new RuntimeException("按 documentId 删除 Elasticsearch 文档失败", e);
         }
     }
 
-    // -------------------------------------------------------------------------
-    // 公开辅助
-    // -------------------------------------------------------------------------
-
-    /**
-     * 返回当前使用的索引名。
-     */
     public String indexName() {
         return indexName;
     }
 
-    /**
-     * 创建预配置的 BM25 检索器，指向同一索引，使用相同的 analyzer。
-     */
     public ElasticsearchBM25Retriever createBM25Retriever() {
         return ElasticsearchBM25Retriever.builder(client)
                 .addIndex(indexName)
-                .analyzer(analyzer)
                 .build();
     }
 
-    // -------------------------------------------------------------------------
-    // 内部辅助
-    // -------------------------------------------------------------------------
+    public HybridRetriever createHybridRetriever() {
+        return HybridRetriever.builder(client)
+                .indexName(indexName)
+                .build();
+    }
+
+    RetrievalResponse searchKnn(SearchRequest request) {
+        Query filter = support.buildFilter(request);
+        KnnSearch.Builder knnBuilder = new KnnSearch.Builder()
+                .field(ElasticsearchSearchSupport.FIELD_EMBEDDING)
+                .queryVector(support.toQueryVector(request.queryEmbedding()))
+                .k((long) request.size())
+                .numCandidates((long) request.numCandidates());
+        if (filter != null) {
+            knnBuilder.filter(filter);
+        }
+
+        try {
+            SearchResponse<Map> response = client.search(
+                    s -> s.index(indexName)
+                            .knn(knnBuilder.build())
+                            .size(request.size())
+                            .profile(request.trace()),
+                    Map.class
+            );
+            List<SearchResult> results = new ArrayList<>();
+            for (Hit<Map> hit : response.hits().hits()) {
+                results.add(support.toSearchResult(hit.source(), hit.score() != null ? hit.score() : 0.0));
+            }
+            return support.buildResponse(
+                    request,
+                    RetrievalMode.KNN,
+                    results,
+                    response.took(),
+                    response.profile() != null,
+                    List.of("knn")
+            );
+        } catch (ElasticsearchException e) {
+            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
+                return support.buildResponse(request, RetrievalMode.KNN, List.of(), 0L, false, List.of("knn"));
+            }
+            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Elasticsearch kNN 检索失败", e);
+        }
+    }
 
     private void ensureIndexExists() {
         try {
@@ -229,18 +204,17 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
     }
 
     private void createIndex() throws IOException {
-        final int finalDims = this.dims;
-        final String finalAnalyzer = this.analyzer;
+        final int finalDims = dims;
         client.indices().create(CreateIndexRequest.of(c -> c
                 .index(indexName)
                 .mappings(m -> m
-                        .properties(FIELD_CHUNK_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
-                        .properties(FIELD_DOCUMENT_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
-                        .properties(FIELD_KNOWLEDGE_BASE_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
-                        .properties(FIELD_CONTENT, p -> p.text(TextProperty.of(t -> t.analyzer(finalAnalyzer))))
-                        .properties(FIELD_CHUNK_INDEX, p -> p.integer(i -> i))
-                        .properties(FIELD_METADATA, p -> p.object(ObjectProperty.of(o -> o.dynamic(co.elastic.clients.elasticsearch._types.mapping.DynamicMapping.True))))
-                        .properties(FIELD_EMBEDDING, p -> p.denseVector(DenseVectorProperty.of(d -> d
+                        .properties(ElasticsearchSearchSupport.FIELD_CHUNK_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
+                        .properties(ElasticsearchSearchSupport.FIELD_DOCUMENT_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
+                        .properties(ElasticsearchSearchSupport.FIELD_KNOWLEDGE_BASE_ID, p -> p.keyword(KeywordProperty.of(k -> k)))
+                        .properties(ElasticsearchSearchSupport.FIELD_CONTENT, p -> p.text(TextProperty.of(t -> t.analyzer(ElasticsearchSearchSupport.DEFAULT_ANALYZER))))
+                        .properties(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX, p -> p.integer(i -> i))
+                        .properties(ElasticsearchSearchSupport.FIELD_METADATA, p -> p.object(ObjectProperty.of(o -> o.dynamic(co.elastic.clients.elasticsearch._types.mapping.DynamicMapping.True))))
+                        .properties(ElasticsearchSearchSupport.FIELD_EMBEDDING, p -> p.denseVector(DenseVectorProperty.of(d -> d
                                 .dims(finalDims)
                                 .index(true)
                                 .similarity("cosine")
@@ -251,153 +225,18 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
 
     private Map<String, Object> buildDocument(DocumentChunk chunk, String chunkId) {
         Map<String, Object> doc = new HashMap<>();
-        doc.put(FIELD_CHUNK_ID, chunkId);
-        doc.put(FIELD_DOCUMENT_ID, chunk.documentId());
-        doc.put(FIELD_KNOWLEDGE_BASE_ID, chunk.knowledgeBaseId());
-        doc.put(FIELD_CONTENT, chunk.content());
-        doc.put(FIELD_CHUNK_INDEX, chunk.chunkIndex());
-        doc.put(FIELD_METADATA, chunk.metadata());
-
-        float[] emb = chunk.embedding();
-        if (emb != null) {
-            List<Float> vec = new ArrayList<>(emb.length);
-            for (float v : emb) vec.add(v);
-            doc.put(FIELD_EMBEDDING, vec);
+        doc.put(ElasticsearchSearchSupport.FIELD_CHUNK_ID, chunkId);
+        doc.put(ElasticsearchSearchSupport.FIELD_DOCUMENT_ID, chunk.documentId());
+        doc.put(ElasticsearchSearchSupport.FIELD_KNOWLEDGE_BASE_ID, chunk.knowledgeBaseId());
+        doc.put(ElasticsearchSearchSupport.FIELD_CONTENT, chunk.content());
+        doc.put(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX, chunk.chunkIndex());
+        doc.put(ElasticsearchSearchSupport.FIELD_METADATA, chunk.metadata());
+        float[] embedding = chunk.embedding();
+        if (embedding != null) {
+            doc.put(ElasticsearchSearchSupport.FIELD_EMBEDDING, support.toQueryVector(embedding));
         }
         return doc;
     }
-
-    private Query buildFilter(SearchRequest request) {
-        List<Query> filters = new ArrayList<>();
-
-        if (request.knowledgeBaseIds() != null && !request.knowledgeBaseIds().isEmpty()) {
-            filters.add(Query.of(q -> q.terms(t -> t
-                    .field(FIELD_KNOWLEDGE_BASE_ID)
-                    .terms(tv -> tv.value(request.knowledgeBaseIds().stream()
-                            .map(co.elastic.clients.elasticsearch._types.FieldValue::of)
-                            .collect(Collectors.toList())))
-            )));
-        }
-
-        if (request.documentIds() != null && !request.documentIds().isEmpty()) {
-            filters.add(Query.of(q -> q.terms(t -> t
-                    .field(FIELD_DOCUMENT_ID)
-                    .terms(tv -> tv.value(request.documentIds().stream()
-                            .map(co.elastic.clients.elasticsearch._types.FieldValue::of)
-                            .collect(Collectors.toList())))
-            )));
-        }
-
-        if (request.chunkIds() != null && !request.chunkIds().isEmpty()) {
-            filters.add(Query.of(q -> q.terms(t -> t
-                    .field(FIELD_CHUNK_ID)
-                    .terms(tv -> tv.value(request.chunkIds().stream()
-                            .map(co.elastic.clients.elasticsearch._types.FieldValue::of)
-                            .collect(Collectors.toList())))
-            )));
-        }
-
-        MetadataFilter mf = request.metadataFilter();
-        if (mf != null) {
-            filters.add(metadataFilterToQuery(mf));
-        }
-
-        if (filters.isEmpty()) return null;
-        if (filters.size() == 1) return filters.get(0);
-        return Query.of(q -> q.bool(b -> b.filter(filters)));
-    }
-
-    private Query metadataFilterToQuery(MetadataFilter filter) {
-        switch (filter.type()) {
-            case AND: {
-                List<Query> children = filter.children().stream()
-                        .map(this::metadataFilterToQuery)
-                        .collect(Collectors.toList());
-                return Query.of(q -> q.bool(b -> b.filter(children)));
-            }
-            case OR: {
-                List<Query> children = filter.children().stream()
-                        .map(this::metadataFilterToQuery)
-                        .collect(Collectors.toList());
-                return Query.of(q -> q.bool(b -> b.should(children).minimumShouldMatch("1")));
-            }
-            case NOT: {
-                Query child = metadataFilterToQuery(filter.children().get(0));
-                return Query.of(q -> q.bool(b -> b.mustNot(child)));
-            }
-            case CONDITION:
-            default:
-                return conditionToQuery(filter);
-        }
-    }
-
-    private Query conditionToQuery(MetadataFilter filter) {
-        String field = FIELD_METADATA + "." + filter.key();
-        Object value = filter.value();
-        switch (filter.operator()) {
-            case EQ:
-                return Query.of(q -> q.term(t -> t.field(field).value(toFieldValue(value))));
-            case NE:
-                return Query.of(q -> q.bool(b -> b.mustNot(
-                        Query.of(q2 -> q2.term(t -> t.field(field).value(toFieldValue(value))))
-                )));
-            case GT:
-                return Query.of(q -> q.range(r -> r.field(field).gt(toJsonData(value))));
-            case GTE:
-                return Query.of(q -> q.range(r -> r.field(field).gte(toJsonData(value))));
-            case LT:
-                return Query.of(q -> q.range(r -> r.field(field).lt(toJsonData(value))));
-            case LTE:
-                return Query.of(q -> q.range(r -> r.field(field).lte(toJsonData(value))));
-            case IN: {
-                @SuppressWarnings("unchecked")
-                List<Object> values = (List<Object>) value;
-                List<co.elastic.clients.elasticsearch._types.FieldValue> fieldValues = values.stream()
-                        .map(this::toFieldValue)
-                        .collect(Collectors.toList());
-                return Query.of(q -> q.terms(t -> t.field(field)
-                        .terms(tv -> tv.value(fieldValues))));
-            }
-            case EXISTS:
-                return Query.of(q -> q.exists(e -> e.field(field)));
-            default:
-                throw new IllegalArgumentException("不支持的 MetadataFilter operator: " + filter.operator());
-        }
-    }
-
-    private co.elastic.clients.elasticsearch._types.FieldValue toFieldValue(Object value) {
-        if (value instanceof String) return co.elastic.clients.elasticsearch._types.FieldValue.of((String) value);
-        if (value instanceof Long) return co.elastic.clients.elasticsearch._types.FieldValue.of((Long) value);
-        if (value instanceof Integer) return co.elastic.clients.elasticsearch._types.FieldValue.of((long) (Integer) value);
-        if (value instanceof Double) return co.elastic.clients.elasticsearch._types.FieldValue.of((Double) value);
-        if (value instanceof Boolean) return co.elastic.clients.elasticsearch._types.FieldValue.of((Boolean) value);
-        return co.elastic.clients.elasticsearch._types.FieldValue.of(value.toString());
-    }
-
-    private co.elastic.clients.json.JsonData toJsonData(Object value) {
-        return co.elastic.clients.json.JsonData.of(value);
-    }
-
-    @SuppressWarnings("unchecked")
-    private SearchResult toSearchResult(Map source, double score) {
-        Map<String, Object> metadata = source.containsKey(FIELD_METADATA)
-                ? (Map<String, Object>) source.get(FIELD_METADATA)
-                : Map.of();
-        Integer chunkIndex = source.get(FIELD_CHUNK_INDEX) != null
-                ? ((Number) source.get(FIELD_CHUNK_INDEX)).intValue()
-                : null;
-        return SearchResult.builder(
-                (String) source.get(FIELD_KNOWLEDGE_BASE_ID),
-                (String) source.get(FIELD_DOCUMENT_ID),
-                (String) source.get(FIELD_CHUNK_ID),
-                (String) source.get(FIELD_CONTENT),
-                score
-        ).metadata(metadata).chunkIndex(chunkIndex).build();
-    }
-
-    // -------------------------------------------------------------------------
-    // Builder
-    // -------------------------------------------------------------------------
 
     public static Builder builder(ElasticsearchClient client, int dims) {
         return new Builder(client, dims);
@@ -407,7 +246,6 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         private final ElasticsearchClient client;
         private final int dims;
         private String indexName = "knowledge_chunks";
-        private String analyzer = "ik_smart";
 
         private Builder(ElasticsearchClient client, int dims) {
             this.client = client;
@@ -416,11 +254,6 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
 
         public Builder indexName(String indexName) {
             this.indexName = indexName;
-            return this;
-        }
-
-        public Builder analyzer(String analyzer) {
-            this.analyzer = analyzer;
             return this;
         }
 

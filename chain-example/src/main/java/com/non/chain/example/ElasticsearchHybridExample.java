@@ -3,24 +3,20 @@ package com.non.chain.example;
 import com.non.chain.embedding.DashScopeEmbeddingModel;
 import com.non.chain.embedding.EmbeddingModel;
 import com.non.chain.knowledge.DocumentChunk;
+import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
-import com.non.chain.knowledge.elasticsearch.ElasticsearchBM25Retriever;
 import com.non.chain.knowledge.elasticsearch.ElasticsearchKnowledgeStore;
-import com.non.chain.knowledge.elasticsearch.HybridRetriever;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.json.jackson.JacksonJsonpMapper;
 import co.elastic.clients.transport.rest_client.RestClientTransport;
 import org.apache.http.HttpHost;
 import org.elasticsearch.client.RestClient;
 
-import java.util.Collections;
-import java.util.List;
-
 /**
- * 示例：使用 ElasticsearchKnowledgeStore + HybridRetriever 进行混合检索。
+ * 示例：使用 ElasticsearchKnowledgeStore 的统一检索入口进行混合检索。
  *
- * 前置条件：Elasticsearch 8.x 运行在 localhost:9200
+ * 前置条件：Elasticsearch 运行在 localhost:9200，且服务端支持原生 retriever API，并安装 IK 分词插件。
  */
 public class ElasticsearchHybridExample {
 
@@ -53,20 +49,25 @@ public class ElasticsearchHybridExample {
         store.add(chunk);
         System.out.println("文档已写入 Elasticsearch 索引: " + store.indexName());
 
-        // 5. 混合检索（向量 + BM25 RRF 融合）
+        // 5. 混合检索（向量 + BM25，ES 原生 retriever）
         float[] queryVec = embeddingModel.embed("Elasticsearch 是分布式搜索引擎");
 
-        ElasticsearchBM25Retriever bm25 = store.createBM25Retriever();
+        RetrievalResponse response = store.search(SearchRequest.builder()
+                .queryText("Elasticsearch 是分布式搜索引擎")
+                .queryEmbedding(queryVec)
+                .size(5)
+                .addKnowledgeBaseId(kbId)
+                .debug(true)
+                .build());
 
-        HybridRetriever hybrid = HybridRetriever.builder(store, bm25)
-                .build();
-
-        List<SearchResult> results = hybrid.search(
-                queryVec, "Elasticsearch 是分布式搜索引擎", 5,
-                Collections.singletonList(kbId),
-                Collections.emptyList());
-        results.forEach(r -> System.out.printf(
-                "[%.4f] %s%n", r.score(), r.content()));
+        for (SearchResult result : response.results()) {
+            System.out.printf(
+                    "[%.4f] %s%n", result.score(), result.content());
+        }
+        if (response.debugInfo() != null) {
+            System.out.println("检索模式: " + response.debugInfo().mode());
+            System.out.println("融合策略: " + response.debugInfo().fusionStrategy());
+        }
 
         restClient.close();
     }

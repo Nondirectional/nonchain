@@ -14,7 +14,7 @@ NonChain 是一个轻量级的 Java LLM 应用开发库。
 
 ### Knowledge Store
 
-支持 Pgvector 和 Elasticsearch 两种向量存储后端。
+知识检索能力统一由 Elasticsearch 提供，支持向量检索、BM25 和混合检索。
 
 ## 示例代码
 

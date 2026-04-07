@@ -8,7 +8,7 @@ public interface KnowledgeStore {
 
     List<String> addAll(List<DocumentChunk> chunks);
 
-    List<SearchResult> search(SearchRequest request);
+    RetrievalResponse search(SearchRequest request);
 
     void delete(String chunkId);
 
