@@ -5,14 +5,13 @@
 
   <groupId>com.non</groupId>
   <artifactId>nonchain</artifactId>
-  <version>0.3.0</version>
+  <version>0.4.0</version>
   <packaging>pom</packaging>
 
   <name>nonchain</name>
 
   <modules>
     <module>chain</module>
-    <module>chain-pgvector</module>
     <module>chain-elasticsearch</module>
     <module>chain-document</module>
     <module>chain-example</module>

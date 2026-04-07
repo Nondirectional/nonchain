@@ -4,6 +4,38 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.4.0] - 2026-04-07
+
+### 新增
+
+- 统一检索请求模型 `SearchRequest`：支持 BM25 / kNN / hybrid 自动降级（仅文本→BM25，仅向量→kNN，两者→hybrid）
+- `RetrievalResponse` / `RetrievalDebugInfo`：默认精简返回，`debug` / `trace` 开关按需返回诊断信息
+- `RetrievalMode` 枚举（BM25 / KNN / HYBRID）和 `FusionStrategy` 枚举（RRF / LINEAR）
+- `MetadataFilter` 树形过滤模型：支持 AND / OR / NOT 逻辑组合及 EQ / NE / GT / GTE / LT / LTE / IN / EXISTS 操作符
+- `ElasticsearchSearchSupport` 包级共享工具：统一过滤构建、BM25 查询、结果映射、诊断信息构建
+- 客户端侧 RRF 融合：不依赖 ES 许可证，兼容所有版本
+- 客户端侧 Linear 融合（min-max 归一化 + 加权求和）
+- 140 个单元测试覆盖 `SearchRequest` / `RetrievalResponse` / `RetrievalDebugInfo` / `MetadataFilter` / `FusionStrategy` / `RetrievalMode`
+
+### 变更
+
+- 知识检索能力收敛为 Elasticsearch 单一路线，移除 `chain-pgvector` 模块与 `PgvectorKnowledgeStore`
+- `KnowledgeStore.search(SearchRequest)` 返回 `RetrievalResponse`
+- `KeywordRetriever.search(...)` 改为接收 `SearchRequest`
+- `HybridRetriever` 改为客户端侧融合（RRF / Linear），不再依赖 ES 原生 retriever
+- BM25 路径固定检索 `content` 字段，分析器固定 `ik_smart`
+- 统一过滤入口（knowledgeBaseIds / documentIds / chunkIds / metadataFilter）在 BM25、kNN、hybrid 三条路径保持一致
+- 默认调参：size=10，rankWindowSize=max(50, size×5)，numCandidates=max(100, rankWindowSize×2)
+- 移除统一 `minScore`，避免跨检索路径分数语义歧义
+- README、架构文档、安装文档、示例文档全部收敛为 ES-only 叙事
+- 新增 Elasticsearch-only 迁移指南（`docs/migrations/elasticsearch-only.md`）
+
+### 移除
+
+- `chain-pgvector` 模块、`PgvectorKnowledgeStore`、`PgvectorExample`
+- `docs/pgvector/` 文档目录
+- 顶层 `pom.xml` 中 `chain-pgvector` 模块声明
+
 ## [0.3.0] - 2026-04-07
 
 ### 新增
