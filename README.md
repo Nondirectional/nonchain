@@ -12,8 +12,7 @@
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
 - **文档切分** — 4 种切分策略：递归字符、标题层级、语义、组合切分
-- **向量存储** — PgVector / Elasticsearch 实现，支持元数据过滤
-- **混合检索** — 向量搜索 + BM25 关键词检索，RRF 融合排序
+- **统一检索** — Elasticsearch 单独承担向量检索、BM25 与混合检索，支持元数据过滤和 RRF / Linear 融合策略
 - **结构化输出** — 支持 JSON Object 响应格式
 
 ## 要求
@@ -39,7 +38,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -49,7 +48,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -59,17 +58,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.3.0</version>
-</dependency>
-```
-
-PgVector 向量存储（可选）：
-
-```xml
-<dependency>
-    <groupId>com.non</groupId>
-    <artifactId>chain-pgvector</artifactId>
-    <version>0.3.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -249,40 +238,25 @@ CompositeDocumentSplitter splitter = new CompositeDocumentSplitter(
 );
 ```
 
-### 向量存储与检索
+### 检索
 
-**PgVector：**
-
-```java
-PgvectorKnowledgeStore store = PgvectorKnowledgeStore.builder()
-        .host("localhost").port(5432)
-        .database("nonchain").user("postgres").password("postgres")
-        .embeddingModel(embeddingModel)
-        .build();
-
-store.add(chunk);
-List<SearchResult> results = store.search(SearchRequest.builder()
-        .queryEmbedding(embedding)
-        .topK(5)
-        .minScore(0.7)
-        .build());
-```
-
-**Elasticsearch 混合检索：**
+统一检索入口由 `ElasticsearchKnowledgeStore.search(SearchRequest)` 提供：
 
 ```java
-ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder()
-        .host("localhost").port(9200)
-        .embeddingModel(embeddingModel)
+ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder(esClient, 1024)
         .build();
 
-KeywordRetriever bm25 = store.createBM25Retriever();
-HybridRetriever hybrid = HybridRetriever.builder()
-        .vectorRetriever(store)
-        .keywordRetriever(bm25)
+RetrievalResponse response = store.search(SearchRequest.builder()
+        .queryText("查询文本")
+        .queryEmbedding(queryEmbedding)   // 仅文本 -> BM25；仅向量 -> kNN；两者同时存在 -> hybrid
+        .size(5)
+        .addKnowledgeBaseId("kb-demo")
+        .debug(true)
         .build();
 
-List<SearchResult> results = hybrid.search("查询文本", 5);
+for (SearchResult result : response.results()) {
+    System.out.printf("[%.4f] %s%n", result.score(), result.content());
+}
 ```
 
 ## 模块说明
@@ -291,9 +265,8 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 |------|------|
 | `chain` | 核心模块：LLM 抽象、工具函数、图工作流、知识存储接口、文档模型、Embedding、多模态消息 |
 | `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 4 种文档切分策略 |
-| `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、混合检索（RRF） |
-| `chain-pgvector` | PgVector 向量存储 |
-| `chain-example` | 示例代码（20 个可运行的 Demo） |
+| `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、原生 retriever 混合检索 |
+| `chain-example` | 示例代码（可运行 Demo） |
 
 ## 架构
 
@@ -321,15 +294,17 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
      │   (interface)   │    │ + 清洗管道       │
      └────────┬────────┘    │ + 文档切分       │
               │             └─────────────────┘
-     ┌────────┼────────┐
-     │                 │
- PgVector        Elasticsearch
- KnowledgeStore  KnowledgeStore + BM25 + HybridRetriever
+     ┌───────────────┐
+     │ Elasticsearch │
+     │ KnowledgeStore│
+     │ + BM25        │
+     │ + Hybrid      │
+     └───────────────┘
 ```
 
 ## 示例
 
-`chain-example` 模块包含 22 个可运行的示例：
+`chain-example` 模块包含多组可运行示例：
 
 | 示例 | 说明 |
 |------|------|
@@ -343,7 +318,6 @@ List<SearchResult> results = hybrid.search("查询文本", 5);
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |
-| `PgvectorExample` | PgVector 向量存储完整流程 |
 | `ElasticsearchHybridExample` | ES 混合检索完整流程 |
 | `TxtDocumentReaderExample` | TXT 文档解析 |
 | `MarkdownDocumentReaderExample` | Markdown 文档解析 |

@@ -64,21 +64,18 @@ nonchain 采用分层架构设计，自上而下分为四层：Provider 层、Fr
 │   ┌──────────────────┴───────────────────────┐              │
 │   │        KnowledgeStore (接口)               │              │
 │   │                                           │              │
-│   │  SearchRequest   SearchResult             │              │
+│   │  SearchRequest   RetrievalResponse        │              │
 │   │  MetadataFilter  KeywordRetriever         │              │
 │   │  TextChunk        DocumentChunk            │              │
 │   │                                           │              │
-│   │  ┌──────────────┐  ┌─────────────────┐   │              │
-│   │  │   PgVector    │  │ Elasticsearch    │   │              │
-│   │  │ KnowledgeStore│  │ KnowledgeStore   │   │              │
-│   │  │              │  │                  │   │              │
-│   │  │  pgvector    │  │  dense_vector    │   │              │
-│   │  │  cosine sim  │  │  kNN search      │   │              │
-│   │  │  HikariCP    │  │                  │   │              │
-│   │  └──────────────┘  │  BM25 Retriever  │   │              │
-│   │                     │  HybridRetriever │   │              │
-│   │                     │  (RRF fusion)    │   │              │
-│   │                     └─────────────────┘   │              │
+│   │              ┌──────────────────────┐     │              │
+│   │              │ Elasticsearch         │     │              │
+│   │              │ KnowledgeStore        │     │              │
+│   │              │ dense_vector + kNN    │     │              │
+│   │              │ BM25(content,ik_smart)│     │              │
+│   │              │ Hybrid Retriever      │     │              │
+│   │              │ (ES native retriever) │     │              │
+│   │              └──────────────────────┘     │              │
 │   └───────────────────────────────────────────┘              │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
@@ -171,28 +168,24 @@ Storage 层提供知识数据的持久化存储和检索能力。
 **核心接口：**
 
 - `KnowledgeStore` — 知识存储接口，定义 `add()`、`search()`、`delete()` 等基本 CRUD 操作
-- `KeywordRetriever` — 关键词检索接口，定义 `search(queryText, topK)` 方法
-- `SearchRequest` — 搜索请求值对象，支持查询向量、topK、最低分数、知识库/文档/块 ID 过滤和元数据过滤
-- `SearchResult` — 搜索结果值对象，包含知识库 ID、文档 ID、块 ID、内容和分数
+- `KeywordRetriever` — 关键词检索接口，定义 `search(SearchRequest)` 方法
+- `SearchRequest` — 统一搜索请求值对象，支持 `queryText`、`queryEmbedding`、`size`、`rankWindowSize`、`numCandidates`、过滤条件、`debug/trace`
+- `RetrievalResponse` — 顶层检索响应，包含 `results` 和可选 `debugInfo`
+- `SearchResult` — 单条检索结果值对象，包含知识库 ID、文档 ID、块 ID、内容和分数
 - `MetadataFilter` — 元数据过滤器，支持条件组合（AND/OR/NOT）和多种操作符（EQ/NE/GT/GTE/LT/LTE/EXISTS/IN）
 - `DocumentChunk` — 文档块值对象，包含内容、向量、元数据和索引位置
 
 **存储实现：**
 
-- `PgvectorKnowledgeStore` — 基于 PostgreSQL + pgvector 扩展的实现
-  - 使用余弦相似度（`<=>` 操作符）
-  - 通过 HikariCP 管理数据库连接池
-  - 首次连接时自动创建扩展、表和索引（ivfflat）
-  - 支持 JSONB 格式的元数据存储和过滤
-
-- `ElasticsearchKnowledgeStore` — 基于 Elasticsearch 的实现
+- `ElasticsearchKnowledgeStore` — 基于 Elasticsearch 的统一实现
   - 使用 `dense_vector` 类型存储向量，通过 kNN 搜索实现近邻查询
-  - 支持 `ik_smart` 中文分词器
+  - `content` 字段固定使用 `ik_smart`
   - 自动创建索引和映射
   - 支持动态元数据映射
+  - 支持统一请求下的 BM25 / kNN / hybrid 自动分流
 
 - `ElasticsearchBM25Retriever` — 基于 Elasticsearch 的 BM25 关键词检索
-- `HybridRetriever` — 双路混合检索器，结合向量检索和 BM25 检索，通过 RRF（Reciprocal Rank Fusion）算法融合排序
+- `HybridRetriever` — Elasticsearch 原生 retriever 的混合检索包装器，第一版默认 `RRF`
 
 ## 模块依赖关系
 
@@ -200,18 +193,16 @@ Storage 层提供知识数据的持久化存储和检索能力。
 chain-example
     ├── chain-document
     │   └── chain
-    ├── chain-elasticsearch
-    │   └── chain
-    └── chain-pgvector
+    └── chain-elasticsearch
         └── chain
 ```
 
 依赖关系遵循以下原则：
 
 - `chain` 是基础模块，不依赖任何其他 nonchain 模块
-- `chain-document`、`chain-elasticsearch`、`chain-pgvector` 均仅依赖 `chain`
-- 三个功能扩展模块之间互不依赖，可以按需独立引入
-- `chain-example` 依赖所有模块，仅用于演示
+- `chain-document`、`chain-elasticsearch` 均仅依赖 `chain`
+- 功能扩展模块之间互不依赖，可以按需独立引入
+- `chain-example` 依赖公开模块，仅用于演示
 
 ## 设计原则
 
@@ -226,12 +217,12 @@ nonchain 的核心能力均通过 Java 接口定义，实现与使用解耦：
 | `DocumentReader` | 文档解析 | `TxtDocumentReader`, `MarkdownDocumentReader`, `HtmlDocumentReader`, `DocxDocumentReader`, `PdfDocumentReader` |
 | `DocumentCleaner` | 文档清洗 | `ControlCharacterRemover`, `UnicodeNormalizer`, 等 |
 | `DocumentSplitter` | 文档切分 | `RecursiveCharacterSplitter`, `HeaderDocumentSplitter`, `SemanticSplitter`, `CompositeDocumentSplitter` |
-| `KnowledgeStore` | 知识存储 | `PgvectorKnowledgeStore`, `ElasticsearchKnowledgeStore` |
+| `KnowledgeStore` | 知识存储 | `ElasticsearchKnowledgeStore` |
 | `KeywordRetriever` | 关键词检索 | `ElasticsearchBM25Retriever` |
 | `ContentMeasure` | 内容度量 | `CharacterMeasure`, `TokenMeasure` |
 | `ContentPart` | 多模态内容部件 | `TextPart`, `ImageUrlPart` |
 
-这种设计使得替换底层实现变得简单。例如，要将 PgVector 切换为 Elasticsearch，只需将 `PgvectorKnowledgeStore` 替换为 `ElasticsearchKnowledgeStore`，其他代码无需修改。
+这种设计使得统一请求模型可以在不同检索模式下复用。调用方通过 `SearchRequest` 描述查询意图，底层由 Elasticsearch 负责自动选择 BM25、kNN 或 hybrid 路径。
 
 ### Builder 模式
 
@@ -247,18 +238,12 @@ Graph graph = Graph.builder("workflow")
     .build();
 
 // SearchRequest 构建
-SearchRequest request = SearchRequest.builder(embedding)
-    .topK(5)
-    .minScore(0.7)
+SearchRequest request = SearchRequest.builder()
+    .queryText("向量数据库")
+    .queryEmbedding(embedding)
+    .size(5)
     .addKnowledgeBaseId("kb1")
     .metadataFilter(filter)
-    .build();
-
-// PgvectorKnowledgeStore 构建
-PgvectorKnowledgeStore store = PgvectorKnowledgeStore.builder(jdbcUrl, dimension)
-    .username("postgres")
-    .password("postgres")
-    .poolSize(10)
     .build();
 ```
 
@@ -291,7 +276,7 @@ nonchain 中的数据模型（`Message`、`ChatResult`、`ParsedDocument`、`Tex
 - `ToolRegistry` 只负责工具的注册和执行调度，不关心工具的具体实现
 - `Graph` 只负责工作流的执行编排，不关心每个 Node 的具体逻辑
 - `CleanerPipeline` 只负责串联清洗器，不关心每种清洗的具体策略
-- `HybridRetriever` 只负责融合两路检索结果，不关心具体的检索实现
+- `HybridRetriever` 只负责对 Elasticsearch 原生混合检索做包装，不重复在客户端实现融合逻辑
 
 ### 最小依赖
 
@@ -337,11 +322,11 @@ KnowledgeStore.addAll()        ← 入库
 EmbeddingModel.embed()         ← 查询向量化
     │
     ▼
-KnowledgeStore.search()        ← 向量检索
-    │   + KeywordRetriever.search()  ← 关键词检索
-    │   + HybridRetriever             ← 混合检索（RRF）
+KnowledgeStore.search()        ← 统一检索入口
+    │   + KeywordRetriever.search()  ← 专用 BM25 包装
+    │   + HybridRetriever             ← ES 原生混合检索包装
     ▼
-List<SearchResult>             ← 检索结果
+RetrievalResponse              ← 检索响应
     │
     ▼
 LLM.chat(查询 + 检索结果)       ← LLM 生成回答
@@ -388,7 +373,7 @@ public class MyDocumentReader implements DocumentReader {
 
 ### 添加新的知识存储
 
-实现 `KnowledgeStore` 接口即可接入新的向量数据库：
+实现 `KnowledgeStore` 接口即可接入新的检索后端：
 
 ```java
 public class MyKnowledgeStore implements KnowledgeStore {
@@ -397,7 +382,7 @@ public class MyKnowledgeStore implements KnowledgeStore {
     @Override
     public List<String> addAll(List<DocumentChunk> chunks) { /* ... */ }
     @Override
-    public List<SearchResult> search(SearchRequest request) { /* ... */ }
+    public RetrievalResponse search(SearchRequest request) { /* ... */ }
     @Override
     public void delete(String chunkId) { /* ... */ }
     @Override

@@ -1,11 +1,11 @@
 # Elasticsearch 向量存储
 
-`ElasticsearchKnowledgeStore` 是基于 Elasticsearch `dense_vector` 类型和 kNN 搜索的 `KnowledgeStore` 实现。提供向量存储、kNN 检索、元数据过滤和批量操作等完整功能。
+`ElasticsearchKnowledgeStore` 是 nonchain 当前官方的统一检索实现。它基于 Elasticsearch `dense_vector`、BM25 和原生 retriever，提供统一的写入、过滤和检索能力。
 
 ## 特性
 
 - 自动创建索引（如不存在）
-- 可配置分词器（默认 `ik_smart`）
+- 固定使用 `ik_smart`
 - 完整的 `MetadataFilter` 支持（EQ、NE、GT、GTE、LT、LTE、IN、EXISTS、AND、OR、NOT）
 - kNN 向量检索（余弦相似度）
 - 批量写入（Bulk API）
@@ -17,7 +17,7 @@
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -25,13 +25,13 @@
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| `com.non:chain` | 0.1.0 | 核心模块 |
-| `co.elastic.clients:elasticsearch-java` | 8.13.4 | Elasticsearch Java 客户端 |
+| `com.non:chain` | 0.4.0 | 核心模块 |
+| `co.elastic.clients:elasticsearch-java` | 8.13.4 | 与 Java 11 兼容的 Elasticsearch Java 客户端 |
 | `com.fasterxml.jackson.core:jackson-databind` | 2.17.1 | JSON 序列化 |
 
 ## 前置条件
 
-- Elasticsearch 8.x 运行中
+- Elasticsearch 服务运行中，且服务端支持原生 retriever API
 - 如使用 `ik_smart` 分词器，需安装 IK Analysis 插件
 
 ## 索引结构
@@ -59,7 +59,7 @@
 | `chunk_id` | keyword | 文档块唯一标识 |
 | `document_id` | keyword | 所属文档 ID |
 | `knowledge_base_id` | keyword | 所属知识库 ID |
-| `content` | text | 文档块内容，使用可配置分词器 |
+| `content` | text | 文档块内容，固定使用 `ik_smart` |
 | `embedding` | dense_vector | 向量嵌入，支持 kNN 检索，余弦相似度 |
 | `chunk_index` | integer | 文档块在原文中的序号 |
 | `metadata` | object (dynamic) | 自定义元数据，支持动态字段 |
@@ -71,12 +71,10 @@
 | `client` | ElasticsearchClient（必填） | - |
 | `dims` | 向量维度（必填） | - |
 | `indexName` | 索引名 | `knowledge_chunks` |
-| `analyzer` | content 字段的分词器 | `ik_smart` |
 
 ```java
 ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder(esClient, 1024)
         .indexName("my_knowledge_chunks")
-        .analyzer("ik_max_word")
         .build();
 ```
 
@@ -107,20 +105,22 @@ List<String> chunkIds = store.addAll(chunks);
 
 ```java
 // 基础检索
-SearchRequest request = SearchRequest.builder(queryEmbedding)
-        .topK(5)
+SearchRequest request = SearchRequest.builder()
+        .queryEmbedding(queryEmbedding)
+        .size(5)
         .build();
-List<SearchResult> results = store.search(request);
+RetrievalResponse response = store.search(request);
 
 // 带过滤条件的检索
-SearchRequest request = SearchRequest.builder(queryEmbedding)
-        .topK(10)
-        .minScore(0.5)
+SearchRequest request = SearchRequest.builder()
+        .queryText("检索词")
+        .queryEmbedding(queryEmbedding)
+        .size(10)
         .addKnowledgeBaseId("kb-demo")
         .addDocumentId("doc-001")
         .metadataFilter(MetadataFilter.eq("source", "docs"))
         .build();
-List<SearchResult> results = store.search(request);
+RetrievalResponse filtered = store.search(request);
 ```
 
 ### 删除操作
@@ -149,7 +149,6 @@ ElasticsearchBM25Retriever bm25 = store.createBM25Retriever();
 ```java
 ElasticsearchBM25Retriever bm25 = ElasticsearchBM25Retriever.builder(esClient)
         .addIndex(store.indexName())
-        .analyzer("ik_smart")
         .build();
 ```
 
@@ -251,22 +250,26 @@ public class ElasticsearchStoreExample {
 
         // 5. kNN 向量检索
         float[] queryVec = embeddingModel.embed("分布式搜索引擎");
-        SearchRequest request = SearchRequest.builder(queryVec)
-                .topK(3)
+        SearchRequest request = SearchRequest.builder()
+                .queryEmbedding(queryVec)
+                .size(3)
                 .addKnowledgeBaseId(kbId)
                 .build();
 
-        List<SearchResult> results = store.search(request);
+        RetrievalResponse response = store.search(request);
         System.out.println("检索结果:");
-        for (SearchResult result : results) {
+        for (SearchResult result : response.results()) {
             System.out.printf("[%.4f] %s%n", result.score(), result.content());
         }
 
         // 6. 创建 BM25 检索器
         ElasticsearchBM25Retriever bm25 = store.createBM25Retriever();
-        List<SearchResult> bm25Results = bm25.search("全文搜索", 3);
+        RetrievalResponse bm25Results = bm25.search(SearchRequest.builder()
+                .queryText("全文搜索")
+                .size(3)
+                .build());
         System.out.println("BM25 结果:");
-        for (SearchResult result : bm25Results) {
+        for (SearchResult result : bm25Results.results()) {
             System.out.printf("[%.4f] %s%n", result.score(), result.content());
         }
 

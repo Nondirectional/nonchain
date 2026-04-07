@@ -17,11 +17,8 @@
 # DashScope API（用于 LLM 调用和 Embedding）
 export DASHSCOPE_API_KEY=your_api_key_here
 
-# Elasticsearch（用于 ES 向量存储和混合检索示例）
-# 确保 ES 8.x 运行在 localhost:9200
-
-# PostgreSQL + pgvector（用于 PgVector 示例）
-# 确保 PostgreSQL 运行在 localhost:5432 并已安装 pgvector 扩展
+# Elasticsearch（用于统一检索示例）
+# 确保 Elasticsearch 运行在 localhost:9200，服务端支持原生 retriever API，并安装 IK 分词插件
 
 # Python（用于 RapidOCR 示例）
 # pip install rapidocr
@@ -36,7 +33,7 @@ mvn compile exec:java -pl chain-example \
 
 # 指定类名运行
 mvn compile exec:java -pl chain-example \
-    -Dexec.mainClass="com.non.chain.example.PgvectorExample"
+    -Dexec.mainClass="com.non.chain.example.ElasticsearchHybridExample"
 ```
 
 ### IDE 运行
@@ -130,7 +127,6 @@ mvn compile exec:java -pl chain-example \
 | 示例类 | 说明 |
 |--------|------|
 | `EmbeddingModelExample` | Embedding 模型使用 |
-| `PgvectorExample` | PgVector 向量存储完整流程 |
 | `ElasticsearchHybridExample` | ES 混合检索完整流程 |
 
 #### EmbeddingModelExample
@@ -142,22 +138,9 @@ mvn compile exec:java -pl chain-example \
     -Dexec.mainClass="com.non.chain.example.EmbeddingModelExample"
 ```
 
-#### PgvectorExample
-
-演示 PgVector 向量存储的完整流程：创建 Store、写入文档分块、执行相似度检索。需要 PostgreSQL + pgvector 环境。
-
-```bash
-mvn compile exec:java -pl chain-example \
-    -Dexec.mainClass="com.non.chain.example.PgvectorExample"
-```
-
-前置条件：
-1. PostgreSQL 已安装 pgvector 扩展
-2. 执行过 `CREATE EXTENSION IF NOT EXISTS vector;`
-
 #### ElasticsearchHybridExample
 
-演示 Elasticsearch 向量存储 + 混合检索的完整流程：创建 Store、写入数据、创建 BM25 检索器、执行双路混合检索。需要 Elasticsearch 8.x 环境。
+演示 Elasticsearch 统一检索的完整流程：创建 Store、写入数据、构造统一 `SearchRequest`，并在 ES 内部完成 hybrid 检索。需要服务端支持原生 retriever API。
 
 ```bash
 mvn compile exec:java -pl chain-example \
@@ -165,8 +148,8 @@ mvn compile exec:java -pl chain-example \
 ```
 
 前置条件：
-1. Elasticsearch 8.x 运行在 localhost:9200
-2. 已安装 IK Analysis 插件（可选，使用默认分词器时不需要）
+1. Elasticsearch 运行在 localhost:9200，且服务端支持原生 retriever API
+2. 已安装 IK Analysis 插件
 
 ### 文档处理
 
@@ -292,29 +275,24 @@ mvn compile exec:java -pl chain-example \
 
 ## 依赖说明
 
-`chain-example` 模块依赖所有功能模块：
+`chain-example` 模块依赖公开功能模块：
 
 ```xml
 <dependencies>
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain</artifactId>
-        <version>0.1.0</version>
-    </dependency>
-    <dependency>
-        <groupId>com.non</groupId>
-        <artifactId>chain-pgvector</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
     <!-- LLM API -->
     <dependency>
@@ -362,5 +340,5 @@ mvn compile exec:java -pl chain-example \
 1. **LLM 基础**：`FunctionCallExample` -> `StructuredOutputExample` -> `ImageInputExample`
 2. **文档处理**：`TxtDocumentReaderExample` -> `MarkdownDocumentReaderExample` -> `PdfDocumentReaderExample` -> `DocumentCleanerExample`
 3. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample`
-4. **向量存储**：`EmbeddingModelExample` -> `PgvectorExample` -> `ElasticsearchHybridExample`
+4. **统一检索**：`EmbeddingModelExample` -> `ElasticsearchHybridExample` -> `GraphKnowledgeExample`
 5. **工作流**：`EasyWorkflowExample` -> `GraphKnowledgeExample`

@@ -8,7 +8,7 @@
 
 - [Introduction](docs/overview/introduction.md): A lightweight Java AI application framework with LLM abstraction, tool calling, graph workflow, document processing, and knowledge retrieval.
 - [Getting Started](docs/overview/getting-started.md): Clone the repo, install with Maven, and add dependencies. Requires Java 11+ and Maven 3.6+.
-- [Installation](docs/overview/installation.md): `git clone` and `mvn install -DskipTests`. Add Maven dependencies for core, document, elasticsearch, or pgvector modules.
+- [Installation](docs/overview/installation.md): `git clone` and `mvn install -DskipTests`. Add Maven dependencies for core, document, and elasticsearch modules.
 - [Architecture](docs/overview/architecture.md): Layered architecture — LLM Provider, Tool Framework, Graph Engine, Embedding, KnowledgeStore interface, DocumentReader pipeline.
 
 ### LLM Provider
@@ -53,16 +53,16 @@
 - [KnowledgeStore 知识存储](docs/knowledge/store.md): KnowledgeStore interface, KeywordRetriever interface, value objects (DocumentChunk, SearchRequest, SearchResult, SourceDocument, TextChunk). Typical knowledge base workflow.
 - [MetadataFilter 元数据过滤](docs/knowledge/metadata-filter.md): Composable metadata filter with CONDITION, AND, OR, NOT types and EQ, NE, GT, GTE, LT, LTE, IN, EXISTS operators.
 
-### PgVector
-
-- [PgVector 向量存储](docs/pgvector/store.md): PostgreSQL + pgvector implementation. Auto-creates database, table, ivfflat indexes. Full MetadataFilter support. HikariCP connection pooling.
-
 ### Elasticsearch
 
-- [Elasticsearch 向量存储](docs/elasticsearch/store.md): Elasticsearch dense_vector + kNN implementation. Auto-creates index with configurable analyzer. Full MetadataFilter support.
-- [BM25 关键词检索](docs/elasticsearch/bm25.md): BM25 full-text search using match query. ElasticsearchBM25Retriever with configurable analyzer.
-- [混合检索](docs/elasticsearch/hybrid-retrieval.md): Dual-path hybrid retriever — vector + keyword search merged via Reciprocal Rank Fusion (RRF).
+- [Elasticsearch 向量存储](docs/elasticsearch/store.md): Elasticsearch-only retrieval store covering BM25, kNN, and hybrid retrieval through a unified SearchRequest.
+- [BM25 关键词检索](docs/elasticsearch/bm25.md): BM25 full-text retrieval on the `content` field via ElasticsearchBM25Retriever.
+- [混合检索](docs/elasticsearch/hybrid-retrieval.md): Elasticsearch native retriever-based hybrid retrieval with RRF by default and Linear reserved as an extension point.
+
+### Migrations
+
+- [Elasticsearch-Only Migration](docs/migrations/elasticsearch-only.md): Breaking changes for removing `chain-pgvector` and adopting the unified retrieval request/response model.
 
 ### Examples
 
-- [示例代码](docs/examples/overview.md): 20 runnable examples in chain-example module — LLM calling, tool functions, workflow, embedding, vector stores, document processing, splitting strategies.
+- [示例代码](docs/examples/overview.md): Runnable examples in chain-example module — LLM calling, tool functions, workflow, embedding, Elasticsearch retrieval, document processing, splitting strategies.

@@ -146,9 +146,10 @@ Embedding 模型通常与 KnowledgeStore 配合使用，实现文档的向量化
 import com.non.chain.embedding.DashScopeEmbeddingModel;
 import com.non.chain.embedding.EmbeddingModel;
 import com.non.chain.knowledge.DocumentChunk;
+import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
-import com.non.chain.knowledge.pgvector.PgvectorKnowledgeStore;
+import com.non.chain.knowledge.elasticsearch.ElasticsearchKnowledgeStore;
 
 import java.util.List;
 
@@ -158,14 +159,11 @@ public class EmbeddingWithKnowledgeStore {
         EmbeddingModel embeddingModel = new DashScopeEmbeddingModel("text-embedding-v4");
 
         // 2. 初始化 KnowledgeStore（维度需要与 Embedding 模型匹配）
-        PgvectorKnowledgeStore store = PgvectorKnowledgeStore.builder(
-                        "jdbc:postgresql://localhost:5432/nonchain", 1024)
-                .username("postgres")
-                .password("postgres")
+        ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder(esClient, 1024)
                 .build();
 
         // 3. 文档内容
-        String content = "pgvector 是 PostgreSQL 的向量扩展，支持高效的相似度搜索";
+        String content = "Elasticsearch 支持向量检索和全文检索";
         String kbId = "kb-demo";
         String docId = "doc-001";
 
@@ -181,15 +179,16 @@ public class EmbeddingWithKnowledgeStore {
         System.out.println("已存储 chunkId: " + chunkId);
 
         // 5. 查询向量化并检索
-        float[] queryVec = embeddingModel.embed("PostgreSQL 向量搜索");
-        SearchRequest request = SearchRequest.builder(queryVec)
-                .topK(3)
-                .minScore(0.5)
+        float[] queryVec = embeddingModel.embed("Elasticsearch 向量搜索");
+        SearchRequest request = SearchRequest.builder()
+                .queryText("Elasticsearch 向量搜索")
+                .queryEmbedding(queryVec)
+                .size(3)
                 .addKnowledgeBaseId(kbId)
                 .build();
 
-        List<SearchResult> results = store.search(request);
-        results.forEach(r -> System.out.printf(
+        RetrievalResponse response = store.search(request);
+        response.results().forEach(r -> System.out.printf(
                 "[%.4f] %s%n", r.score(), r.content()
         ));
     }

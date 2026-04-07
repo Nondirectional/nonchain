@@ -15,8 +15,7 @@
 
 | 依赖 | 版本要求 | 说明 |
 |------|---------|------|
-| PostgreSQL | 13+ | 使用 PgVector 向量存储时需要，并需安装 pgvector 扩展 |
-| Elasticsearch | 8.x | 使用 Elasticsearch 向量存储时需要 |
+| Elasticsearch | 支持 retriever API 的版本 | 使用 Elasticsearch 统一检索时需要 |
 | Tesseract | 4.x+ | 使用 Tesseract OCR 引擎解析 PDF 中的图片时需要 |
 
 ## 从源码构建
@@ -63,7 +62,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -81,7 +80,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -126,13 +125,13 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 > **说明**：如果只需要使用 TXT 解析、清洗管道和递归字符切分（基于字符数度量），则无需引入以上任何 optional 依赖，仅引入 `chain-document` 模块即可。
 
-### Elasticsearch 向量存储模块 `chain-elasticsearch`
+### Elasticsearch 检索模块 `chain-elasticsearch`
 
 ```xml
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.1.0</version>
+    <version>0.4.0</version>
 </dependency>
 ```
 
@@ -140,33 +139,10 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| `co.elastic.clients:elasticsearch-java` | 8.13.4 | Elasticsearch 官方 Java 客户端 |
+| `co.elastic.clients:elasticsearch-java` | 8.13.4 | 与 Java 11 兼容的 Elasticsearch 官方 Java 客户端 |
 | `com.fasterxml.jackson.core:jackson-databind` | 2.17.1 | JSON 序列化/反序列化 |
 
-> **注意**：使用 Elasticsearch 模块时，需要确保 Elasticsearch 服务已安装并运行。如果使用 BM25 关键词检索且需要中文分词，还需安装 ik 分词插件。
-
-### PgVector 向量存储模块 `chain-pgvector`
-
-```xml
-<dependency>
-    <groupId>com.non</groupId>
-    <artifactId>chain-pgvector</artifactId>
-    <version>0.1.0</version>
-</dependency>
-```
-
-该模块会自动引入以下传递依赖：
-
-| 依赖 | 版本 | 说明 |
-|------|------|------|
-| `org.postgresql:postgresql` | 42.7.3 | PostgreSQL JDBC 驱动 |
-| `com.zaxxer:HikariCP` | 5.1.0 | 数据库连接池 |
-
-> **注意**：使用 PgVector 模块时，需要在 PostgreSQL 中启用 pgvector 扩展：
-> ```sql
-> CREATE EXTENSION IF NOT EXISTS vector;
-> ```
-> `PgvectorKnowledgeStore` 在首次连接时会自动尝试创建扩展、表和索引。
+> **注意**：使用 Elasticsearch 模块时，需要确保服务端已安装并运行、支持原生 retriever API，并安装 IK 分词插件。
 
 ## 完整依赖配置示例
 
@@ -178,14 +154,14 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
 
     <!-- 文档处理模块 -->
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
 
     <!-- 文档解析 optional 依赖 -->
@@ -215,18 +191,11 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
         <version>1.1.0</version>
     </dependency>
 
-    <!-- Elasticsearch 向量存储 -->
+    <!-- Elasticsearch 检索 -->
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.1.0</version>
-    </dependency>
-
-    <!-- PgVector 向量存储 -->
-    <dependency>
-        <groupId>com.non</groupId>
-        <artifactId>chain-pgvector</artifactId>
-        <version>0.1.0</version>
+        <version>0.4.0</version>
     </dependency>
 </dependencies>
 ```
@@ -261,14 +230,8 @@ java -DDASHSCOPE_API_KEY=your-api-key-here -jar your-app.jar
 - 确认 API Key 有效且有对应的模型访问权限
 - 确认网络可以访问阿里云 DashScope API 服务
 
-### PgVector 连接失败
-
-- 确认 PostgreSQL 服务已启动
-- 确认已安装 pgvector 扩展：`CREATE EXTENSION IF NOT EXISTS vector;`
-- 确认连接参数（host、port、database、username、password）正确
-
 ### Elasticsearch 连接失败
 
-- 确认 Elasticsearch 服务已启动且版本为 8.x
+- 确认 Elasticsearch 服务已启动且支持原生 retriever API
 - 确认连接参数（host、port）正确
-- 如使用 BM25 检索且需要中文分词，确认已安装 ik 分词插件
+- 确认已安装 ik 分词插件

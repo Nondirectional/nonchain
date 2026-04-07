@@ -181,17 +181,14 @@ MetadataFilter 通过 `SearchRequest.Builder` 的 `metadataFilter` 方法传入�
 import com.non.chain.embedding.DashScopeEmbeddingModel;
 import com.non.chain.embedding.EmbeddingModel;
 import com.non.chain.knowledge.*;
-import com.non.chain.knowledge.pgvector.PgvectorKnowledgeStore;
+import com.non.chain.knowledge.elasticsearch.ElasticsearchKnowledgeStore;
 
 import java.util.List;
 
 public class MetadataFilterSearchExample {
     public static void main(String[] args) {
         EmbeddingModel embeddingModel = new DashScopeEmbeddingModel("text-embedding-v4");
-        PgvectorKnowledgeStore store = PgvectorKnowledgeStore.builder(
-                        "jdbc:postgresql://localhost:5432/nonchain", 1024)
-                .username("postgres")
-                .password("postgres")
+        ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder(esClient, 1024)
                 .build();
 
         // 构建过滤条件：source 为 "docs" 且 year >= 2024
@@ -202,16 +199,17 @@ public class MetadataFilterSearchExample {
 
         // 构建检索请求
         float[] queryVec = embeddingModel.embed("向量数据库");
-        SearchRequest request = SearchRequest.builder(queryVec)
-                .topK(10)
-                .minScore(0.5)
+        SearchRequest request = SearchRequest.builder()
+                .queryText("向量数据库")
+                .queryEmbedding(queryVec)
+                .size(10)
                 .addKnowledgeBaseId("kb-tech")
                 .metadataFilter(filter)  // 附加元数据过滤
                 .build();
 
         // 执行检索
-        List<SearchResult> results = store.search(request);
-        for (SearchResult result : results) {
+        RetrievalResponse response = store.search(request);
+        for (SearchResult result : response.results()) {
             System.out.printf("[%.4f] %s | metadata: %s%n",
                     result.score(),
                     result.content(),
@@ -228,12 +226,14 @@ public class MetadataFilterSearchExample {
 MetadataFilter tagFilter = MetadataFilter.condition("tag", MetadataFilter.Operator.EQ, "tutorial");
 
 float[] queryVec = embeddingModel.embed("如何使用 RAG");
-SearchRequest request = SearchRequest.builder(queryVec)
-        .topK(5)
+SearchRequest request = SearchRequest.builder()
+        .queryText("如何使用 RAG")
+        .queryEmbedding(queryVec)
+        .size(5)
         .metadataFilter(tagFilter)
         .build();
 
-List<SearchResult> results = store.search(request);
+RetrievalResponse results = store.search(request);
 ```
 
 ### 排除特定来源
@@ -245,12 +245,14 @@ MetadataFilter excludeLegacy = MetadataFilter.not(
 );
 
 float[] queryVec = embeddingModel.embed("最新技术文档");
-SearchRequest request = SearchRequest.builder(queryVec)
-        .topK(10)
+SearchRequest request = SearchRequest.builder()
+        .queryText("最新技术文档")
+        .queryEmbedding(queryVec)
+        .size(10)
         .metadataFilter(excludeLegacy)
         .build();
 
-List<SearchResult> results = store.search(request);
+RetrievalResponse results = store.search(request);
 ```
 
 ## 异常说明

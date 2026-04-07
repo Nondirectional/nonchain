@@ -266,9 +266,10 @@ import com.non.chain.flow.Graph;
 import com.non.chain.flow.GraphResult;
 import com.non.chain.flow.Node;
 import com.non.chain.flow.State;
+import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
-import com.non.chain.knowledge.pgvector.PgvectorKnowledgeStore;
+import com.non.chain.knowledge.elasticsearch.ElasticsearchKnowledgeStore;
 
 import java.util.List;
 
@@ -276,7 +277,7 @@ public class RagWorkflowExample {
 
     public static void main(String[] args) {
         EmbeddingModel embeddingModel = ...;  // 你的 EmbeddingModel 实例
-        PgvectorKnowledgeStore store = ...;   // 你的 KnowledgeStore 实例
+        ElasticsearchKnowledgeStore store = ...;   // 你的 KnowledgeStore 实例
 
         // Node 1: 将用户 query 转为向量
         Node embedQuery = new Node("embedQuery", state -> {
@@ -288,12 +289,14 @@ public class RagWorkflowExample {
         // Node 2: 向量检索
         Node retrieve = new Node("retrieve", state -> {
             float[] vec = state.<float[]>get("queryEmbedding").orElseThrow();
-            SearchRequest req = SearchRequest.builder(vec)
-                    .topK(3)
+            SearchRequest req = SearchRequest.builder()
+                    .queryText(state.<String>get("query").orElseThrow())
+                    .queryEmbedding(vec)
+                    .size(3)
                     .addKnowledgeBaseId("kb-demo")
                     .build();
-            List<SearchResult> results = store.search(req);
-            return state.put("retrievedChunks", results);
+            RetrievalResponse response = store.search(req);
+            return state.put("retrievedChunks", response.results());
         });
 
         // Node 3: 基于检索结果生成回答
