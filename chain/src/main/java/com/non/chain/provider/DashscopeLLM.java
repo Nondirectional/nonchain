@@ -8,9 +8,14 @@ import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
 import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.chat.completions.*;
+import com.openai.core.http.StreamResponse;
 import org.jetbrains.annotations.NotNull;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public class DashscopeLLM implements LLM {
@@ -27,7 +32,7 @@ public class DashscopeLLM implements LLM {
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
 
     public DashscopeLLM(String model) {
-        this(null, model,null);
+        this(null, model, null);
     }
 
     public DashscopeLLM(String model, Integer maxCompletionTokens) {
@@ -71,6 +76,8 @@ public class DashscopeLLM implements LLM {
         return this;
     }
 
+    // ---- 同步调用 ----
+
     @Override
     public ChatResult chat(String systemMessage, String userMessage, OutputFormat outputFormat) {
         return chat(systemMessage, userMessage, null, outputFormat);
@@ -83,16 +90,7 @@ public class DashscopeLLM implements LLM {
 
     @Override
     public ChatResult chat(String systemMessage, String userMessage, List<Tool> tools, OutputFormat outputFormat) {
-        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
-                .model(model)
-                .addUserMessage(userMessage);
-        if(maxCompletionTokens != null) {
-            builder.maxCompletionTokens(maxCompletionTokens);
-        }
-        if (systemMessage != null && !systemMessage.isBlank()) {
-            builder.addSystemMessage(systemMessage);
-        }
-
+        ChatCompletionCreateParams.Builder builder = buildSimpleParams(systemMessage, userMessage);
         OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
         validateResponseFormatAndTools(tools, resolvedOutputFormat);
         addTools(builder, tools);
@@ -101,9 +99,62 @@ public class DashscopeLLM implements LLM {
 
     @Override
     public ChatResult chat(List<Message> messages, List<Tool> tools, OutputFormat outputFormat) {
+        ChatCompletionCreateParams.Builder builder = buildMessageListParams(messages);
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
+        addTools(builder, tools);
+        return doChat(builder, resolvedOutputFormat);
+    }
+
+    // ---- 流式调用 ----
+
+    @Override
+    public ChatResult streamChat(String systemMessage, String userMessage, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+        return streamChat(systemMessage, userMessage, null, outputFormat, callback);
+    }
+
+    @Override
+    public ChatResult streamChat(List<Message> messages, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+        return streamChat(messages, null, outputFormat, callback);
+    }
+
+    @Override
+    public ChatResult streamChat(String systemMessage, String userMessage, List<Tool> tools, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+        ChatCompletionCreateParams.Builder builder = buildSimpleParams(systemMessage, userMessage);
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
+        addTools(builder, tools);
+        return doStreamChat(builder, resolvedOutputFormat, callback);
+    }
+
+    @Override
+    public ChatResult streamChat(List<Message> messages, List<Tool> tools, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+        ChatCompletionCreateParams.Builder builder = buildMessageListParams(messages);
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
+        addTools(builder, tools);
+        return doStreamChat(builder, resolvedOutputFormat, callback);
+    }
+
+    // ---- 内部方法 ----
+
+    private ChatCompletionCreateParams.Builder buildSimpleParams(String systemMessage, String userMessage) {
+        ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
+                .model(model)
+                .addUserMessage(userMessage);
+        if (maxCompletionTokens != null) {
+            builder.maxCompletionTokens(maxCompletionTokens);
+        }
+        if (systemMessage != null && !systemMessage.isBlank()) {
+            builder.addSystemMessage(systemMessage);
+        }
+        return builder;
+    }
+
+    private ChatCompletionCreateParams.Builder buildMessageListParams(List<Message> messages) {
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
                 .model(model);
-        if(maxCompletionTokens != null) {
+        if (maxCompletionTokens != null) {
             builder.maxCompletionTokens(maxCompletionTokens);
         }
 
@@ -156,11 +207,7 @@ public class DashscopeLLM implements LLM {
                     throw new IllegalArgumentException("不支持的消息角色: " + msg.role());
             }
         }
-
-        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
-        validateResponseFormatAndTools(tools, resolvedOutputFormat);
-        addTools(builder, tools);
-        return doChat(builder, resolvedOutputFormat);
+        return builder;
     }
 
     private ChatCompletionContentPart toSdkContentPart(ContentPart part) {
@@ -202,7 +249,7 @@ public class DashscopeLLM implements LLM {
         }
     }
 
-    private ChatResult doChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
+    private void applyAdditionalParams(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
         if (enableThinking) {
             builder.putAdditionalBodyProperty("enable_thinking", JsonValue.from(true));
             if (thinkingBudget != null) {
@@ -216,6 +263,10 @@ public class DashscopeLLM implements LLM {
                             .build()
             );
         }
+    }
+
+    private ChatResult doChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
+        applyAdditionalParams(builder, outputFormat);
 
         ChatCompletion completion = client.chat().completions().create(builder.build());
 
@@ -223,42 +274,163 @@ public class DashscopeLLM implements LLM {
                 .findFirst()
                 .map(choice -> {
                     String content = choice.message().content().orElse("无响应");
-                    JsonValue thinkingValue = choice.message()._additionalProperties().get("reasoning_content");
-                    String thinking = thinkingValue != null
-                            ? thinkingValue.accept(new JsonValue.Visitor<>() {
-                        @Override
-                        public String visitString(@NotNull String value) {
-                            return value;
-                        }
-
-                        @Override
-                        public String visitNull() {
-                            return null;
-                        }
-
-                        @Override
-                        public String visitDefault() {
-                            return null;
-                        }
-                    })
-                            : null;
-
-                    List<ToolCall> toolCalls = choice.message().toolCalls()
-                            .map(calls -> calls.stream()
-                                    .filter(ChatCompletionMessageToolCall::isFunction)
-                                    .map(tc -> {
-                                        ChatCompletionMessageFunctionToolCall ftc = tc.asFunction();
-                                        return new ToolCall(
-                                                ftc.id(),
-                                                ftc.function().name(),
-                                                ftc.function().arguments()
-                                        );
-                                    })
-                                    .collect(Collectors.toList()))
-                            .orElse(List.of());
-
+                    String thinking = extractThinking(choice.message());
+                    List<ToolCall> toolCalls = extractToolCalls(choice.message());
                     return new ChatResult(content, thinking, toolCalls);
                 })
                 .orElse(new ChatResult("无响应", null));
+    }
+
+    private ChatResult doStreamChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+        applyAdditionalParams(builder, outputFormat);
+
+        StringBuilder contentBuilder = new StringBuilder();
+        StringBuilder thinkingBuilder = new StringBuilder();
+        Map<Integer, ToolCallAccumulator> toolCallAccumulators = new TreeMap<>();
+
+        try (StreamResponse<ChatCompletionChunk> streamResponse =
+                     client.chat().completions().createStreaming(builder.build())) {
+            streamResponse.stream().forEach(chunk -> {
+                chunk.choices().stream().findFirst().ifPresent(choice -> {
+                    ChatCompletionChunk.Choice.Delta delta = choice.delta();
+                    String deltaContent = delta.content().orElse(null);
+                    String deltaThinking = extractDeltaThinking(delta);
+                    List<ChatChunk.DeltaToolCall> deltaToolCalls = extractDeltaToolCalls(delta);
+
+                    String finishReason = choice.finishReason()
+                            .map(fr -> fr.asString())
+                            .orElse(null);
+
+                    // 累积内容
+                    if (deltaContent != null) {
+                        contentBuilder.append(deltaContent);
+                    }
+                    if (deltaThinking != null) {
+                        thinkingBuilder.append(deltaThinking);
+                    }
+                    // 累积工具调用
+                    for (ChatChunk.DeltaToolCall dtc : deltaToolCalls) {
+                        toolCallAccumulators.computeIfAbsent(dtc.index(),
+                                idx -> new ToolCallAccumulator()).accumulate(dtc);
+                    }
+
+                    ChatChunk chatChunk = new ChatChunk(
+                            deltaContent, deltaThinking, deltaToolCalls, finishReason
+                    );
+                    callback.accept(chatChunk);
+                });
+            });
+        }
+
+        // 组装最终结果
+        List<ToolCall> toolCalls = new ArrayList<>();
+        for (ToolCallAccumulator acc : toolCallAccumulators.values()) {
+            toolCalls.add(acc.toToolCall());
+        }
+
+        return new ChatResult(contentBuilder.toString(), thinkingBuilder.toString(), toolCalls);
+    }
+
+    private String extractThinking(ChatCompletionMessage message) {
+        JsonValue thinkingValue = message._additionalProperties().get("reasoning_content");
+        return thinkingValue != null
+                ? thinkingValue.accept(new JsonValue.Visitor<String>() {
+                    @Override
+                    public String visitString(@NotNull String value) {
+                        return value;
+                    }
+
+                    @Override
+                    public String visitNull() {
+                        return null;
+                    }
+
+                    @Override
+                    public String visitDefault() {
+                        return null;
+                    }
+                })
+                : null;
+    }
+
+    private String extractDeltaThinking(ChatCompletionChunk.Choice.Delta delta) {
+        JsonValue thinkingValue = delta._additionalProperties().get("reasoning_content");
+        return thinkingValue != null
+                ? thinkingValue.accept(new JsonValue.Visitor<String>() {
+                    @Override
+                    public String visitString(@NotNull String value) {
+                        return value;
+                    }
+
+                    @Override
+                    public String visitNull() {
+                        return null;
+                    }
+
+                    @Override
+                    public String visitDefault() {
+                        return null;
+                    }
+                })
+                : null;
+    }
+
+    private List<ToolCall> extractToolCalls(ChatCompletionMessage message) {
+        return message.toolCalls()
+                .map(calls -> calls.stream()
+                        .filter(ChatCompletionMessageToolCall::isFunction)
+                        .map(tc -> {
+                            ChatCompletionMessageFunctionToolCall ftc = tc.asFunction();
+                            return new ToolCall(
+                                    ftc.id(),
+                                    ftc.function().name(),
+                                    ftc.function().arguments()
+                            );
+                        })
+                        .collect(Collectors.toList()))
+                .orElse(List.of());
+    }
+
+    private List<ChatChunk.DeltaToolCall> extractDeltaToolCalls(ChatCompletionChunk.Choice.Delta delta) {
+        return delta.toolCalls()
+                .map(calls -> calls.stream()
+                        .map(tc -> {
+                            String id = tc.id().orElse(null);
+                            String name = tc.function().flatMap(fn -> fn.name()).orElse(null);
+                            String arguments = tc.function().flatMap(fn -> fn.arguments()).orElse(null);
+                            return new ChatChunk.DeltaToolCall(
+                                    (int) tc.index(),
+                                    id,
+                                    name,
+                                    arguments
+                            );
+                        })
+                        .collect(Collectors.toList()))
+                .orElse(List.of());
+    }
+
+    /**
+     * 流式工具调用累积器，按 index 拼接工具调用的 id、name 和 arguments
+     */
+    private static class ToolCallAccumulator {
+        String id;
+        String name;
+        final StringBuilder arguments = new StringBuilder();
+
+        void accumulate(ChatChunk.DeltaToolCall delta) {
+            if (delta.id() != null) {
+                this.id = delta.id();
+            }
+            if (delta.name() != null) {
+                this.name = delta.name();
+            }
+            if (delta.argumentsDelta() != null) {
+                this.arguments.append(delta.argumentsDelta());
+            }
+        }
+
+        ToolCall toToolCall() {
+            return new ToolCall(id, name, arguments.toString());
+        }
     }
 }
