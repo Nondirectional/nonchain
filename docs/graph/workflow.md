@@ -40,6 +40,21 @@ Graph graph = Graph.builder("my-workflow")
 
 状态是节点间传递数据的载体。它包含一个键值对数据存储（`Map<String, Object>`）和消息历史列表（`List<Message>`）。状态在节点之间流转，每个节点可以读取和修改状态。
 
+### GraphEvent（事件）
+
+图执行过程中触发的事件，用于监听和响应图的执行过程。通过 `Graph.Builder.onEvent(Consumer<GraphEvent>)` 设置回调。
+
+支持四种事件类型：
+
+| 类型 | 说明 | node | executedNodes |
+|------|------|------|---------------|
+| `GRAPH_START` | 图开始执行（while 循环前） | null | null |
+| `NODE_START` | 节点开始执行前 | 节点名称 | null |
+| `NODE_END` | 节点执行完成后 | 节点名称 | null |
+| `GRAPH_END` | 图执行完成（while 循环后） | null | 已执行节点列表 |
+
+> **注意**：事件中的 `state` 是该时刻的状态快照（深拷贝），不会被后续执行修改。
+
 ### GraphResult（执行结果）
 
 图的执行结果，包含最终状态、完整的状态历史和已执行的节点列表。
@@ -57,6 +72,7 @@ Graph graph = Graph.builder("my-workflow")
 | `build()` | 构建图（必须至少包含一个节点且指定起始节点） |
 | `run(State initialState)` | 执行图，返回 GraphResult |
 | `name()` | 获取图名称 |
+| `onEvent(Consumer<GraphEvent>)` | 设置事件回调，监听图的执行过程（可选） |
 | `END = "__END__"` | 终止常量，条件路由返回此值时终止执行 |
 
 **Builder 方法链**：`builder`、`addNode`、`addEdge`、`start` 均返回 Builder 本身，支持链式调用。
@@ -92,6 +108,17 @@ Graph graph = Graph.builder("my-workflow")
 | `history()` | 获取消息历史（不可变列表） |
 | `lastAssistantMessage()` | 获取最后一条助手消息，返回 `Optional<String>` |
 
+### GraphEvent
+
+| 方法 | 说明 |
+|------|------|
+| `type()` | 事件类型（GRAPH_START / NODE_START / NODE_END / GRAPH_END） |
+| `node()` | 节点名称（GRAPH_START/GRAPH_END 时为 null） |
+| `state()` | 事件触发时的状态快照（深拷贝） |
+| `executedNodes()` | 已执行节点列表（仅 GRAPH_END 时有值） |
+| `GraphEvent.of(Type, String, State)` | 创建 NODE_START/NODE_END 事件 |
+| `GraphEvent.graphEnd(State, List)` | 创建 GRAPH_END 事件 |
+
 ### GraphResult
 
 | 方法 | 说明 |
@@ -102,6 +129,51 @@ Graph graph = Graph.builder("my-workflow")
 | `printTrace()` | 打印执行轨迹，展示每个节点的状态变化 |
 
 ## 使用示例
+
+### 事件回调
+
+通过 `onEvent` 设置回调，监听图的执行过程：
+
+```java
+Graph graph = Graph.builder("demo")
+        .start("stepA")
+        .addNode(new Node("stepA", state -> state.put("a", true)))
+        .addNode(new Node("stepB", state -> state.put("b", true)))
+        .addEdge(Edge.of("stepA", "stepB"))
+        .addEdge(Edge.of("stepB", Graph.END))
+        .onEvent(e -> {
+            switch (e.type()) {
+                case GRAPH_START:
+                    System.out.println("图开始执行");
+                    break;
+                case NODE_START:
+                    System.out.println("节点开始: " + e.node());
+                    break;
+                case NODE_END:
+                    System.out.println("节点完成: " + e.node());
+                    break;
+                case GRAPH_END:
+                    System.out.println("图执行完成: " + e.executedNodes());
+                    break;
+            }
+        })
+        .build();
+
+GraphResult result = graph.run(new State());
+```
+
+输出：
+
+```
+图开始执行
+节点开始: stepA
+节点完成: stepA
+节点开始: stepB
+节点完成: stepB
+图执行完成: [stepA, stepB]
+```
+
+> 事件回调为可选设置，不设置时图完全静默执行，行为与之前完全一致。
 
 ### 条件路由工作流
 
@@ -333,10 +405,14 @@ public class RagWorkflowExample {
 ## 执行机制
 
 1. 图从 `start` 指定的起始节点开始执行
-2. 获取当前节点并调用其 `processor` 处理状态
-3. 处理完成后，查找该节点的出边（Edge），通过 `route` 方法确定下一个节点
-4. 如果 `route` 返回 `Graph.END`（`"__END__"`）或没有出边，则执行结束
-5. 如果指定的下一个节点不存在，抛出 `IllegalStateException`
+2. 触发 `GRAPH_START` 事件（如已设置回调）
+3. 获取当前节点，触发 `NODE_START` 事件
+4. 调用节点的 `processor` 处理状态
+5. 触发 `NODE_END` 事件
+6. 处理完成后，查找该节点的出边（Edge），通过 `route` 方法确定下一个节点
+7. 如果 `route` 返回 `Graph.END`（`"__END__"`）或没有出边，则执行结束
+8. 触发 `GRAPH_END` 事件（如已设置回调）
+9. 如果指定的下一个节点不存在，抛出 `IllegalStateException`
 
 ## 注意事项
 

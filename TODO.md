@@ -15,7 +15,7 @@
 ## 中优先级（开发体验 & 易用性）
 
 - [ ] **RAG 高级封装** — 底层组件齐全，但缺少开箱即用的 RAG Pipeline（retrieve → inject prompt → call LLM）
-- [ ] **回调/可观测性 (Callback & Observability)** — 缺少统一回调机制（onStart、onToken、onComplete、onError）、Token 用量统计、延迟追踪、OpenTelemetry/Micrometer 集成
+- [ ] **回调/可观测性 (Callback & Observability)** — 缺少统一回调机制（onStart、onToken、onComplete、onError）、Token 用量统计、延迟追踪、OpenTelemetry/Micrometer 集成。Graph 引擎已支持 `GraphEvent` 事件回调（GRAPH_START / NODE_START / NODE_END / GRAPH_END）
 - [ ] **Agent 高级抽象** — 缺少 ReAct Agent、Plan-and-Execute 等高层 Agent 模式，缺少自动工具循环（LLM 调工具 → 观察结果 → 继续推理）
 - [ ] **重试 & 容错** — 缺少内置重试机制（Rate Limit 429、网络超时）、fallback 主备切换、速率限制器
 - [ ] **响应缓存** — 缺少 LLM 响应缓存（相同 prompt 不重复调用），降低开发调试成本

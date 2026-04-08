@@ -117,6 +117,7 @@ Framework 层是 nonchain 的核心，提供了三大基础能力：工具管理
 - `Edge` — 节点间的有向边，支持无条件边（`Edge.of()`）和条件边（`Edge.conditional()`）
 - `State` — 工作流状态，包含键值对数据（`Map<String, Object>`）和消息历史（`List<Message>`），在各节点间传递
 - `GraphResult` — 执行结果，包含最终状态、完整状态历史和已执行节点列表
+- `GraphEvent` — 执行事件，支持通过 `onEvent(Consumer<GraphEvent>)` 回调监听图的执行过程（GRAPH_START / NODE_START / NODE_END / GRAPH_END）
 
 **多模态消息模型：**
 

@@ -4,6 +4,13 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.0] - 2026-04-08
+
+### 新增
+
+- Graph 事件回调：`GraphEvent` 事件类（GRAPH_START / NODE_START / NODE_END / GRAPH_END），通过 `Graph.Builder.onEvent(Consumer<GraphEvent>)` 设置，支持监听图的执行过程
+- `GraphTest`：4 个单元测试覆盖事件回调
+
 ## [0.4.0] - 2026-04-07
 
 ### 新增

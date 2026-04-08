@@ -115,7 +115,7 @@ mvn compile exec:java -pl chain-example \
 
 #### GraphKnowledgeExample
 
-演示将 RAG（检索增强生成）管道构建为图工作流，展示文档检索、上下文组装和 LLM 生成的完整流程。
+演示将 RAG（检索增强生成）管道构建为图工作流，展示文档检索、上下文组装和 LLM 生成的完整流程。同时展示了 `onEvent` 事件回调的用法。
 
 ```bash
 mvn compile exec:java -pl chain-example \

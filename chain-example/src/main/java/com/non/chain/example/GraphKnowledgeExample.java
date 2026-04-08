@@ -81,6 +81,7 @@ public class  GraphKnowledgeExample {
                 .addEdge(Edge.of("embedQuery", "retrieve"))
                 .addEdge(Edge.of("retrieve", "generate"))
                 .addEdge(Edge.of("generate", Graph.END))
+                .onEvent(e -> System.out.println("[" + e.type() + "] " + (e.node() != null ? e.node() : "graph")))
                 .build();
 
         State initial = new State().put("query", "什么是向量数据库？");
