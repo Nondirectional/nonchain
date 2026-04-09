@@ -20,8 +20,8 @@ export DASHSCOPE_API_KEY=your_api_key_here
 # Elasticsearch（用于统一检索示例）
 # 确保 Elasticsearch 运行在 localhost:9200，服务端支持原生 retriever API，并安装 IK 分词插件
 
-# Python（用于 RapidOCR 示例）
-# pip install rapidocr
+# Python（用于 RapidOCR 示例，通过 uv 运行）
+# uv add rapidocr
 ```
 
 ### Maven 运行
@@ -208,7 +208,7 @@ mvn compile exec:java -pl chain-example \
 ```
 
 前置条件：
-- 安装 RapidOCR：`pip install rapidocr`
+- 安装 RapidOCR：`uv add rapidocr`
 - 或安装 Tesseract：确保 `tesseract` 在系统 PATH 中
 
 #### DocumentCleanerExample

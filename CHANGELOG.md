@@ -4,6 +4,12 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.1] - 2026-04-09
+
+### 变更
+
+- `RapidOCREngine` 改用 `uv run python` 调用 RapidOCR，适配无直接 python3 的环境
+
 ## [0.5.0] - 2026-04-08
 
 ### 新增

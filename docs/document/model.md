@@ -272,7 +272,7 @@ public interface OcrEngine {
 
 ### RapidOCREngine
 
-基于 Python RapidOCR 的实现，通过内联 Python 脚本调用。需通过 `pip install rapidocr` 安装依赖。
+基于 Python RapidOCR 的实现，通过内联 Python 脚本调用（使用 `uv run python`）。需通过 `uv add rapidocr` 安装依赖。
 
 ```java
 OcrEngine ocr = new RapidOCREngine()

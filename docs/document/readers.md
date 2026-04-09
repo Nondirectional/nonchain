@@ -277,7 +277,7 @@ public class ReaderRegistryExample {
 | HtmlDocumentReader | `org.jsoup:jsoup` | 1.17.2 | 是 |
 | DocxDocumentReader | `org.apache.poi:poi-ooxml` | 5.2.5 | 是 |
 | PdfDocumentReader | `org.apache.pdfbox:pdfbox` | 2.0.31 | 是 |
-| RapidOCREngine | Python `rapidocr` | - | OCR 时需要 |
+| RapidOCREngine | Python `rapidocr`（通过 `uv`） | - | OCR 时需要 |
 | TesseractOCREngine | 系统 `tesseract` | - | OCR 时需要 |
 
 ```xml

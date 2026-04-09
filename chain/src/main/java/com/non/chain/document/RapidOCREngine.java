@@ -13,7 +13,7 @@ import java.util.List;
  * 基于 RapidOCR 的 OCR 引擎实现。
  * <p>
  * 通过内联 Python 脚本调用 RapidOCR Python API 执行文字识别，
- * 仅输出识别到的纯文本。需通过 pip 安装 rapidocr。
+ * 仅输出识别到的纯文本。需通过 uv 安装 rapidocr（uv add rapidocr）。
  */
 public class RapidOCREngine implements OcrEngine {
 
@@ -70,7 +70,9 @@ public class RapidOCREngine implements OcrEngine {
                 textScore, escapedPath);
 
         List<String> cmd = new ArrayList<>();
-        cmd.add("python3");
+        cmd.add("uv");
+        cmd.add("run");
+        cmd.add("python");
         cmd.add("-c");
         cmd.add(script);
         return cmd;
