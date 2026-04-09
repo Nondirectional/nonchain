@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.2] - 2026-04-09
+
+### 新增
+
+- Graph 错误事件：`NODE_ERROR` 和 `GRAPH_ERROR` 事件类型，节点执行或边路由异常时通过事件回调通知
+- `GraphEvent.error()` 字段：NODE_ERROR / GRAPH_ERROR 事件携带异常消息
+- `GraphEvent.nodeError()` / `GraphEvent.graphError()` 工厂方法
+- 异常时保证 `GRAPH_END` 始终发出，`executedNodes` 仅包含成功执行的节点
+- `GraphTest`：5 个错误场景单元测试（节点异常、边路由异常、异常传播、无回调异常、节点未找到）
+
 ## [0.5.1] - 2026-04-09
 
 ### 变更
