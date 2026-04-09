@@ -44,16 +44,20 @@ Graph graph = Graph.builder("my-workflow")
 
 图执行过程中触发的事件，用于监听和响应图的执行过程。通过 `Graph.Builder.onEvent(Consumer<GraphEvent>)` 设置回调。
 
-支持四种事件类型：
+支持六种事件类型：
 
-| 类型 | 说明 | node | executedNodes |
-|------|------|------|---------------|
-| `GRAPH_START` | 图开始执行（while 循环前） | null | null |
-| `NODE_START` | 节点开始执行前 | 节点名称 | null |
-| `NODE_END` | 节点执行完成后 | 节点名称 | null |
-| `GRAPH_END` | 图执行完成（while 循环后） | null | 已执行节点列表 |
+| 类型 | 说明 | node | error | executedNodes |
+|------|------|------|-------|---------------|
+| `GRAPH_START` | 图开始执行（while 循环前） | null | null | null |
+| `NODE_START` | 节点开始执行前 | 节点名称 | null | null |
+| `NODE_END` | 节点执行完成后 | 节点名称 | null | null |
+| `NODE_ERROR` | 节点执行或边路由异常 | 当前节点名称 | 异常消息 | null |
+| `GRAPH_ERROR` | 图级别异常（NODE_ERROR 之后） | null | 异常消息 | null |
+| `GRAPH_END` | 图执行完成（while 循环后） | null | null | 已执行节点列表 |
 
 > **注意**：事件中的 `state` 是该时刻的状态快照（深拷贝），不会被后续执行修改。
+
+**错误处理**：当节点执行（`node.apply()`）或边路由（`edge.route()`）抛出异常时，事件序列为 `NODE_ERROR → GRAPH_ERROR → GRAPH_END`，随后异常仍会向上传播。`GRAPH_END` 始终会发出，保证执行生命周期完整。`executedNodes` 仅包含成功执行的节点。
 
 ### GraphResult（执行结果）
 
@@ -112,12 +116,15 @@ Graph graph = Graph.builder("my-workflow")
 
 | 方法 | 说明 |
 |------|------|
-| `type()` | 事件类型（GRAPH_START / NODE_START / NODE_END / GRAPH_END） |
-| `node()` | 节点名称（GRAPH_START/GRAPH_END 时为 null） |
+| `type()` | 事件类型（GRAPH_START / NODE_START / NODE_END / NODE_ERROR / GRAPH_ERROR / GRAPH_END） |
+| `node()` | 节点名称（GRAPH_START/GRAPH_ERROR/GRAPH_END 时为 null） |
 | `state()` | 事件触发时的状态快照（深拷贝） |
+| `error()` | 异常消息（仅 NODE_ERROR/GRAPH_ERROR 时有值，其余为 null） |
 | `executedNodes()` | 已执行节点列表（仅 GRAPH_END 时有值） |
-| `GraphEvent.of(Type, String, State)` | 创建 NODE_START/NODE_END 事件 |
+| `GraphEvent.of(Type, String, State)` | 创建通用事件 |
 | `GraphEvent.graphEnd(State, List)` | 创建 GRAPH_END 事件 |
+| `GraphEvent.nodeError(String, State, String)` | 创建 NODE_ERROR 事件 |
+| `GraphEvent.graphError(State, String)` | 创建 GRAPH_ERROR 事件 |
 
 ### GraphResult
 
@@ -151,6 +158,12 @@ Graph graph = Graph.builder("demo")
                     break;
                 case NODE_END:
                     System.out.println("节点完成: " + e.node());
+                    break;
+                case NODE_ERROR:
+                    System.out.println("节点异常: " + e.node() + " - " + e.error());
+                    break;
+                case GRAPH_ERROR:
+                    System.out.println("图异常: " + e.error());
                     break;
                 case GRAPH_END:
                     System.out.println("图执行完成: " + e.executedNodes());
@@ -412,7 +425,15 @@ public class RagWorkflowExample {
 6. 处理完成后，查找该节点的出边（Edge），通过 `route` 方法确定下一个节点
 7. 如果 `route` 返回 `Graph.END`（`"__END__"`）或没有出边，则执行结束
 8. 触发 `GRAPH_END` 事件（如已设置回调）
-9. 如果指定的下一个节点不存在，抛出 `IllegalStateException`
+
+**异常处理流程**：
+
+9. 如果节点执行（步骤 4）或边路由（步骤 6）抛出异常：
+   - 触发 `NODE_ERROR` 事件（node 为当前节点名称，error 为异常消息）
+   - 触发 `GRAPH_ERROR` 事件（error 为异常消息）
+   - 触发 `GRAPH_END` 事件（executedNodes 仅包含已成功执行的节点）
+   - 异常继续向上传播，调用方需 try/catch 处理
+10. 如果指定的下一个节点不存在，按异常处理流程发出 NODE_ERROR → GRAPH_ERROR → GRAPH_END 后抛出 `IllegalStateException`
 
 ## 注意事项
 

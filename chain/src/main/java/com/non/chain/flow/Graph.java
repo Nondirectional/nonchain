@@ -44,22 +44,38 @@ public class Graph {
         while (nextNode != null && !END.equals(nextNode)) {
             Node node = nodes.get(nextNode);
             if (node == null) {
-                throw new IllegalStateException("未找到节点: " + nextNode);
+                String errorMsg = "未找到节点: " + nextNode;
+                emit(GraphEvent.nodeError(nextNode, new State(current), errorMsg));
+                emit(GraphEvent.graphError(new State(current), errorMsg));
+                List<String> finalExecutedNodes = Collections.unmodifiableList(executedNodes);
+                emit(GraphEvent.graphEnd(current, finalExecutedNodes));
+                throw new IllegalStateException(errorMsg);
             }
 
-            emit(GraphEvent.of(GraphEvent.Type.NODE_START, nextNode, new State(current)));
+            String currentNodeName = nextNode;
 
-            current = node.apply(current);
-            executedNodes.add(node.name());
-            history.add(new State(current));
+            try {
+                emit(GraphEvent.of(GraphEvent.Type.NODE_START, currentNodeName, new State(current)));
 
-            emit(GraphEvent.of(GraphEvent.Type.NODE_END, node.name(), new State(current)));
+                current = node.apply(current);
+                executedNodes.add(node.name());
+                history.add(new State(current));
 
-            Edge edge = edges.get(nextNode);
-            if (edge != null) {
-                nextNode = edge.route(current);
-            } else {
-                nextNode = null;
+                emit(GraphEvent.of(GraphEvent.Type.NODE_END, node.name(), new State(current)));
+
+                Edge edge = edges.get(currentNodeName);
+                if (edge != null) {
+                    nextNode = edge.route(current);
+                } else {
+                    nextNode = null;
+                }
+            } catch (Exception e) {
+                String errorMsg = e.getMessage();
+                emit(GraphEvent.nodeError(currentNodeName, new State(current), errorMsg));
+                emit(GraphEvent.graphError(new State(current), errorMsg));
+                List<String> finalExecutedNodes = Collections.unmodifiableList(executedNodes);
+                emit(GraphEvent.graphEnd(current, finalExecutedNodes));
+                throw e;
             }
         }
 
