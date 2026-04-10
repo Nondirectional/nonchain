@@ -168,7 +168,7 @@ Storage 层提供知识数据的持久化存储和检索能力。
 
 **核心接口：**
 
-- `KnowledgeStore` — 知识存储接口，定义 `add()`、`search()`、`delete()` 等基本 CRUD 操作
+- `KnowledgeStore` — 知识存储接口，定义 `add()`、`search()`、`expandContext()`、`delete()` 等基本 CRUD 操作
 - `KeywordRetriever` — 关键词检索接口，定义 `search(SearchRequest)` 方法
 - `SearchRequest` — 统一搜索请求值对象，支持 `queryText`、`queryEmbedding`、`size`、`rankWindowSize`、`numCandidates`、过滤条件、`debug/trace`
 - `RetrievalResponse` — 顶层检索响应，包含 `results` 和可选 `debugInfo`
@@ -384,6 +384,8 @@ public class MyKnowledgeStore implements KnowledgeStore {
     public List<String> addAll(List<DocumentChunk> chunks) { /* ... */ }
     @Override
     public RetrievalResponse search(SearchRequest request) { /* ... */ }
+    @Override
+    public ContextExpansionResponse expandContext(ContextExpansionRequest request) { /* ... */ }
     @Override
     public void delete(String chunkId) { /* ... */ }
     @Override

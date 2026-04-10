@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 20 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 21 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -128,6 +128,7 @@ mvn compile exec:java -pl chain-example \
 |--------|------|
 | `EmbeddingModelExample` | Embedding 模型使用 |
 | `ElasticsearchHybridExample` | ES 混合检索完整流程 |
+| `ElasticsearchContextExpansionExample` | 命中后扩展相邻上下文窗口 |
 
 #### EmbeddingModelExample
 
@@ -149,6 +150,19 @@ mvn compile exec:java -pl chain-example \
 
 前置条件：
 1. Elasticsearch 运行在 localhost:9200，且服务端支持原生 retriever API
+2. 已安装 IK Analysis 插件
+
+#### ElasticsearchContextExpansionExample
+
+演示先通过 BM25 命中一个中心 chunk，再调用 `expandContext(...)` 获取前后相邻 chunk。适合展示 Agent 在发现片段不完整时如何补齐上下文窗口。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.ElasticsearchContextExpansionExample"
+```
+
+前置条件：
+1. Elasticsearch 运行在 localhost:9200
 2. 已安装 IK Analysis 插件
 
 ### 文档处理

@@ -152,6 +152,31 @@ ElasticsearchBM25Retriever bm25 = ElasticsearchBM25Retriever.builder(esClient)
         .build();
 ```
 
+### 扩展相邻上下文
+
+通过 `expandContext(...)` 可以根据 `documentId + centerChunkIndex` 获取固定窗口的相邻 chunk：
+
+```java
+ContextExpansionResponse context = store.expandContext(
+        ContextExpansionRequest.builder("doc-001", 3)
+                .before(1)
+                .after(2)
+                .includeCenter(true)
+                .build()
+);
+
+for (SearchResult chunk : context.chunks()) {
+    System.out.printf("[%d] %s%n", chunk.chunkIndex(), chunk.content());
+}
+```
+
+返回结果保证：
+
+- 仅返回同一 `documentId` 下的 chunk
+- 按 `chunk_index` 升序返回
+- 超出文档边界时自动截断
+- 通过 `hasPrevious()` / `hasNext()` 提示窗口外是否还有更多 chunk
+
 ## MetadataFilter 支持
 
 `MetadataFilter` 映射到 Elasticsearch 的 `metadata.*` 字段查询：

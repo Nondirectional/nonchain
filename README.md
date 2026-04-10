@@ -13,6 +13,7 @@
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
 - **文档切分** — 4 种切分策略：递归字符、标题层级、语义、组合切分
 - **统一检索** — Elasticsearch 单独承担向量检索、BM25 与混合检索，支持元数据过滤和 RRF / Linear 融合策略
+- **上下文扩展** — 命中 chunk 后基于 chunkIndex 向前后扩展邻居 chunk，补齐上下文窗口
 - **结构化输出** — 支持 JSON Object 响应格式
 
 ## 要求
@@ -319,6 +320,7 @@ for (SearchResult result : response.results()) {
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |
 | `ElasticsearchHybridExample` | ES 混合检索完整流程 |
+| `ElasticsearchContextExpansionExample` | 命中后扩展相邻上下文窗口 |
 | `TxtDocumentReaderExample` | TXT 文档解析 |
 | `MarkdownDocumentReaderExample` | Markdown 文档解析 |
 | `HtmlDocumentReaderExample` | HTML 文档解析 |

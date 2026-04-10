@@ -3,6 +3,7 @@ package com.non.chain.knowledge.elasticsearch;
 import co.elastic.clients.elasticsearch.ElasticsearchClient;
 import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.KnnSearch;
+import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.mapping.DenseVectorProperty;
 import co.elastic.clients.elasticsearch._types.mapping.KeywordProperty;
 import co.elastic.clients.elasticsearch._types.mapping.ObjectProperty;
@@ -17,6 +18,9 @@ import co.elastic.clients.elasticsearch.core.bulk.IndexOperation;
 import co.elastic.clients.elasticsearch.core.search.Hit;
 import co.elastic.clients.elasticsearch.indices.CreateIndexRequest;
 import co.elastic.clients.elasticsearch.indices.ExistsRequest;
+import co.elastic.clients.json.JsonData;
+import com.non.chain.knowledge.ContextExpansionRequest;
+import com.non.chain.knowledge.ContextExpansionResponse;
 import com.non.chain.knowledge.DocumentChunk;
 import com.non.chain.knowledge.KnowledgeStore;
 import com.non.chain.knowledge.RetrievalMode;
@@ -98,6 +102,54 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
             case KNN:
             default:
                 return searchKnn(request);
+        }
+    }
+
+    @Override
+    public ContextExpansionResponse expandContext(ContextExpansionRequest request) {
+        ensureCenterChunkExists(request);
+
+        int startIndex = Math.max(0, request.centerChunkIndex() - request.before());
+        int endIndex = request.centerChunkIndex() + request.after();
+
+        try {
+            SearchResponse<Map> response = client.search(
+                    s -> s.index(indexName)
+                            .query(buildWindowQuery(request, startIndex, endIndex))
+                            .size(request.before() + request.after() + 1)
+                            .sort(sort -> sort.field(f -> f
+                                    .field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                                    .order(SortOrder.Asc))),
+                    Map.class
+            );
+
+            List<SearchResult> chunks = new ArrayList<>();
+            for (Hit<Map> hit : response.hits().hits()) {
+                SearchResult result = support.toSearchResult(hit.source(), hit.score() != null ? hit.score() : 0.0);
+                if (!request.includeCenter() && result.chunkIndex() != null
+                        && result.chunkIndex() == request.centerChunkIndex()) {
+                    continue;
+                }
+                chunks.add(result);
+            }
+
+            Integer resultStartIndex = chunks.isEmpty() ? null : chunks.get(0).chunkIndex();
+            Integer resultEndIndex = chunks.isEmpty() ? null : chunks.get(chunks.size() - 1).chunkIndex();
+
+            return ContextExpansionResponse.builder()
+                    .chunks(chunks)
+                    .hasPrevious(startIndex > 0 && existsChunkBefore(request, startIndex))
+                    .hasNext(existsChunkAfter(request, endIndex))
+                    .startChunkIndex(resultStartIndex)
+                    .endChunkIndex(resultEndIndex)
+                    .build();
+        } catch (ElasticsearchException e) {
+            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
+                throw new IllegalArgumentException(buildCenterNotFoundMessage(request));
+            }
+            throw new RuntimeException("Elasticsearch 上下文扩展失败", e);
+        } catch (IOException e) {
+            throw new RuntimeException("Elasticsearch 上下文扩展失败", e);
         }
     }
 
@@ -201,6 +253,104 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         } catch (IOException e) {
             throw new RuntimeException("检查/创建索引失败: " + indexName, e);
         }
+    }
+
+    private void ensureCenterChunkExists(ContextExpansionRequest request) {
+        try {
+            SearchResponse<Map> response = client.search(
+                    s -> s.index(indexName)
+                            .query(buildCenterChunkQuery(request))
+                            .size(1),
+                    Map.class
+            );
+            if (response.hits().hits().isEmpty()) {
+                throw new IllegalArgumentException(buildCenterNotFoundMessage(request));
+            }
+        } catch (ElasticsearchException e) {
+            if (e.error() != null && "index_not_found_exception".equals(e.error().type())) {
+                throw new IllegalArgumentException(buildCenterNotFoundMessage(request));
+            }
+            throw new RuntimeException("检查中心 chunk 失败", e);
+        } catch (IOException e) {
+            throw new RuntimeException("检查中心 chunk 失败", e);
+        }
+    }
+
+    private boolean existsChunkBefore(ContextExpansionRequest request, int startIndex) throws IOException {
+        SearchResponse<Map> response = client.search(
+                s -> s.index(indexName)
+                        .query(buildBeforeQuery(request, startIndex))
+                        .size(1),
+                Map.class
+        );
+        return !response.hits().hits().isEmpty();
+    }
+
+    private boolean existsChunkAfter(ContextExpansionRequest request, int endIndex) throws IOException {
+        SearchResponse<Map> response = client.search(
+                s -> s.index(indexName)
+                        .query(buildAfterQuery(request, endIndex))
+                        .size(1),
+                Map.class
+        );
+        return !response.hits().hits().isEmpty();
+    }
+
+    private Query buildCenterChunkQuery(ContextExpansionRequest request) {
+        return buildScopedQuery(
+                request,
+                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .gte(JsonData.of(request.centerChunkIndex()))
+                        .lte(JsonData.of(request.centerChunkIndex()))))
+        );
+    }
+
+    private Query buildWindowQuery(ContextExpansionRequest request, int startIndex, int endIndex) {
+        return buildScopedQuery(
+                request,
+                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .gte(JsonData.of(startIndex))
+                        .lte(JsonData.of(endIndex))))
+        );
+    }
+
+    private Query buildBeforeQuery(ContextExpansionRequest request, int startIndex) {
+        return buildScopedQuery(
+                request,
+                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .lt(JsonData.of(startIndex))))
+        );
+    }
+
+    private Query buildAfterQuery(ContextExpansionRequest request, int endIndex) {
+        return buildScopedQuery(
+                request,
+                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .gt(JsonData.of(endIndex))))
+        );
+    }
+
+    private Query buildScopedQuery(ContextExpansionRequest request, Query chunkIndexQuery) {
+        List<Query> filters = new ArrayList<>();
+        filters.add(Query.of(q -> q.term(t -> t
+                .field(ElasticsearchSearchSupport.FIELD_DOCUMENT_ID)
+                .value(request.documentId()))));
+        if (request.knowledgeBaseId() != null) {
+            filters.add(Query.of(q -> q.term(t -> t
+                    .field(ElasticsearchSearchSupport.FIELD_KNOWLEDGE_BASE_ID)
+                    .value(request.knowledgeBaseId()))));
+        }
+        filters.add(chunkIndexQuery);
+        return Query.of(q -> q.bool(b -> b.filter(filters)));
+    }
+
+    private String buildCenterNotFoundMessage(ContextExpansionRequest request) {
+        String message = "未找到中心 chunk: documentId=" + request.documentId()
+                + ", chunkIndex=" + request.centerChunkIndex();
+        if (request.knowledgeBaseId() != null) {
+            message += ", knowledgeBaseId=" + request.knowledgeBaseId();
+        }
+        return message;
     }
 
     private void createIndex() throws IOException {

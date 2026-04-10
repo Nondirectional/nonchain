@@ -10,6 +10,8 @@ public interface KnowledgeStore {
 
     RetrievalResponse search(SearchRequest request);
 
+    ContextExpansionResponse expandContext(ContextExpansionRequest request);
+
     void delete(String chunkId);
 
     void deleteAll(List<String> chunkIds);
