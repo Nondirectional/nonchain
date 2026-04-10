@@ -4,6 +4,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.3] - 2026-04-10
+
+### 新增
+
+- 知识库上下文扩展：`KnowledgeStore.expandContext(ContextExpansionRequest)` 接口方法，基于中心 chunk 向前后扩展邻居 chunk
+- `ContextExpansionRequest` 值对象：指定 documentId、centerChunkIndex、before/after 窗口大小，支持 includeCenter 和 knowledgeBaseId 过滤
+- `ContextExpansionResponse` 值对象：返回扩展后的 chunk 列表，携带 hasPrevious/hasNext 分页标识和 startChunkIndex/endChunkIndex 范围
+- `ElasticsearchKnowledgeStore` 上下文扩展实现：基于 chunkIndex 范围查询，自动校验中心 chunk 存在性
+- `ElasticsearchContextExpansionExample` 示例：演示上下文扩展用法
+- `ContextExpansionRequestTest` / `ContextExpansionResponseTest` 单元测试
+
 ## [0.5.2] - 2026-04-09
 
 ### 新增
