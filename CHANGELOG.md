@@ -4,6 +4,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.5] - 2026-04-13
+
+### 新增
+
+- `LlmDocumentSplitter`：基于 LLM 的语义切分器，单次 LLM 调用完成清洗与切分，输出 JSON 数组格式的语义完整 chunk
+  - Hybrid 架构：先用规则清洗管线处理确定性噪音，再由 LLM 完成语义清洗和切分
+  - 预分段机制：将文档按 `segmentSize` 分段后逐段发送 LLM，支持大文档处理
+  - 原子元素透传：TABLE、CODE_BLOCK、IMAGE 绕过 LLM 通过 `SplitterSupport` 直接输出
+  - JSON 解析容错：`extractJsonArray()` 处理 LLM 在 JSON 前后添加额外文字的情况
+  - 重试与降级：最多 2 次重试，全部失败后自动降级到 `RecursiveCharacterSplitter`
+  - 可配置参数：`targetChunkSize`、`segmentSize`、`promptTemplate`（中文默认 prompt）
+- `LlmChunkResult` 值对象：对应 LLM JSON 输出的 `content` + `title` 字段
+- `LlmDocumentSplitterExample` 示例：演示纯文本切分、含原子元素切分、自定义 prompt 三种场景
+- `LlmDocumentSplitterTest`：13 个单元测试覆盖正常切分、原子元素透传、JSON 容错、重试降级、Builder 校验等
+
 ## [0.5.4] - 2026-04-13
 
 ### 新增

@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 21 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 22 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -242,6 +242,7 @@ mvn compile exec:java -pl chain-example \
 | `HeaderDocumentSplitterExample` | 标题层级切分 |
 | `CompositeDocumentSplitterExample` | 组合切分 |
 | `SemanticSplitterExample` | 语义切分 |
+| `LlmDocumentSplitterExample` | LLM 语义切分 |
 
 #### RecursiveCharacterSplitterExample
 
@@ -286,6 +287,21 @@ mvn compile exec:java -pl chain-example \
 
 前置条件：
 - 需要配置 `DASHSCOPE_API_KEY` 环境变量（使用 DashScope Embedding 模型）
+
+#### LlmDocumentSplitterExample
+
+演示 `LlmDocumentSplitter` 的三种用法：
+1. 纯文本切分 -- 对文本进行语义清洗和智能切分
+2. 含原子元素切分 -- 表格、代码块自动透传，仅文本部分走 LLM
+3. 自定义 prompt -- 使用英文 prompt 进行切分
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.LlmDocumentSplitterExample"
+```
+
+前置条件：
+- 需要配置 `DASHSCOPE_API_KEY` 环境变量（使用 DashScope LLM）
 
 ## 依赖说明
 
@@ -353,6 +369,6 @@ mvn compile exec:java -pl chain-example \
 
 1. **LLM 基础**：`FunctionCallExample` -> `StructuredOutputExample` -> `ImageInputExample`
 2. **文档处理**：`TxtDocumentReaderExample` -> `MarkdownDocumentReaderExample` -> `PdfDocumentReaderExample` -> `DocumentCleanerExample`
-3. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample`
+3. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample` -> `LlmDocumentSplitterExample`
 4. **统一检索**：`EmbeddingModelExample` -> `ElasticsearchHybridExample` -> `GraphKnowledgeExample`
 5. **工作流**：`EasyWorkflowExample` -> `GraphKnowledgeExample`

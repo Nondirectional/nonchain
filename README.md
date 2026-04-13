@@ -11,7 +11,7 @@
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
-- **文档切分** — 4 种切分策略：递归字符、标题层级、语义、组合切分
+- **文档切分** — 5 种切分策略：递归字符、标题层级、语义、组合切分、LLM 语义切分
 - **统一检索** — Elasticsearch 单独承担向量检索、BM25 与混合检索，支持元数据过滤和 RRF / Linear 融合策略
 - **上下文扩展** — 命中 chunk 后基于 chunkIndex 向前后扩展邻居 chunk，补齐上下文窗口
 - **结构化输出** — 支持 JSON Object 响应格式
@@ -198,7 +198,7 @@ ParsedDocument cleaned = pipeline.clean(doc);
 
 ### 文档切分
 
-提供 4 种切分策略，适用于不同的文档处理场景：
+提供 5 种切分策略，适用于不同的文档处理场景：
 
 **递归字符切分** — 按分隔符层级递归切分，支持字符数和 Token 数度量：
 
@@ -239,6 +239,15 @@ CompositeDocumentSplitter splitter = new CompositeDocumentSplitter(
 );
 ```
 
+**LLM 语义切分** — 基于 LLM 进行语义清洗和智能切分，chunk 质量最优：
+
+```java
+LlmDocumentSplitter splitter = LlmDocumentSplitter.builder(llm)
+        .targetChunkSize(500)
+        .contentMeasure(new TokenMeasure(EncodingType.CL100K_BASE))
+        .build();
+```
+
 ### 检索
 
 统一检索入口由 `ElasticsearchKnowledgeStore.search(SearchRequest)` 提供：
@@ -265,7 +274,7 @@ for (SearchResult result : response.results()) {
 | 模块 | 说明 |
 |------|------|
 | `chain` | 核心模块：LLM 抽象、工具函数、图工作流、知识存储接口、文档模型、Embedding、多模态消息 |
-| `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 4 种文档切分策略 |
+| `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 5 种文档切分策略 |
 | `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、原生 retriever 混合检索 |
 | `chain-example` | 示例代码（可运行 Demo） |
 
@@ -331,6 +340,7 @@ for (SearchResult result : response.results()) {
 | `HeaderDocumentSplitterExample` | 标题层级切分 |
 | `CompositeDocumentSplitterExample` | 组合切分（标题 + 字符） |
 | `SemanticSplitterExample` | 语义切分（基于 Embedding） |
+| `LlmDocumentSplitterExample` | LLM 语义切分 |
 
 运行示例前需设置环境变量：
 

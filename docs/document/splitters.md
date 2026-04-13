@@ -1,6 +1,6 @@
 # 文档切分策略
 
-nonchain 提供 4 种文档切分策略，将 `ParsedDocument` 切分为适合向量检索和 LLM 处理的 `TextChunk`。不同的切分策略适用于不同的文档结构和应用场景。
+nonchain 提供 5 种文档切分策略，将 `ParsedDocument` 切分为适合向量检索和 LLM 处理的 `TextChunk`。不同的切分策略适用于不同的文档结构和应用场景。
 
 ## 核心接口
 
@@ -336,6 +336,80 @@ for (TextChunk chunk : chunks) {
 // TABLE 原子元素直接透传，携带 headingPath 元数据
 ```
 
+### LlmDocumentSplitter
+
+基于 LLM 的语义切分器。利用 LLM 对文本进行语义清洗和智能切分，产出语义完整的 chunk，适合对切分质量要求较高的 RAG 场景。
+
+**工作原理：**
+1. 将文档元素按 `segmentSize` 分组为若干片段（segment）
+2. 原子元素（TABLE、CODE_BLOCK、IMAGE）直接透传，不经过 LLM
+3. 对文本类片段，调用 LLM 进行语义清洗和切分，输出 JSON 数组 `[{"content": "...", "title": "..."}]`
+4. 解析 JSON 输出，构建带元数据的 TextChunk
+5. JSON 解析失败时自动重试（最多 2 次），全部失败则降级到 RecursiveCharacterSplitter
+
+**特点：**
+- 单次 LLM 调用同时完成清洗和切分，效率高于两阶段方案
+- 语义完整性最优：LLM 理解上下文，不会在句子或段落中间截断
+- 原子元素自动绕过 LLM，保持表格/代码/图片完整性
+- 支持自定义 prompt 模板，适配不同领域和语言
+
+#### Builder 配置
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `llm` | LLM 实例（必填） | - |
+| `contentMeasure` | 内容度量方式 | CharacterMeasure |
+| `targetChunkSize` | 目标 chunk 大小（度量值） | 500 |
+| `segmentSize` | 预分段大小，控制每次 LLM 输入长度 | 5000 |
+| `promptTemplate` | 自定义 prompt 模板（需包含 `TARGET_SIZE` 占位符） | 中文默认 prompt |
+
+```java
+// 基础用法
+LlmDocumentSplitter splitter = LlmDocumentSplitter.builder(llm)
+        .targetChunkSize(500)
+        .build();
+
+// 按 token 控制
+LlmDocumentSplitter splitter = LlmDocumentSplitter.builder(llm)
+        .targetChunkSize(500)
+        .segmentSize(4000)
+        .contentMeasure(new TokenMeasure(EncodingType.CL100K_BASE))
+        .build();
+
+// 自定义 prompt
+String customPrompt = "Split the text into chunks. Target size: TARGET_SIZE tokens.\n" +
+        "Output: [{\"content\": \"...\", \"title\": \"...\"}]";
+LlmDocumentSplitter splitter = LlmDocumentSplitter.builder(llm)
+        .targetChunkSize(500)
+        .promptTemplate(customPrompt)
+        .build();
+```
+
+#### 使用示例
+
+```java
+LLM llm = DashscopeLLM.builder().apiKey("your-api-key").build();
+
+LlmDocumentSplitter splitter = LlmDocumentSplitter.builder(llm)
+        .targetChunkSize(300)
+        .segmentSize(3000)
+        .contentMeasure(new TokenMeasure(EncodingType.CL100K_BASE))
+        .build();
+
+String text = "人工智能正在改变软件开发的方方面面。" +
+        "从代码生成到自动化测试，AI工具正在提高开发效率。" +
+        "足球世界杯是全球最受关注的体育赛事之一。" +
+        "每四年举办一次，吸引了数十亿观众。";
+
+List<TextChunk> chunks = splitter.split(text);
+for (TextChunk chunk : chunks) {
+    System.out.println("title: " + chunk.metadata().get("title"));
+    System.out.println("content: " + chunk.content());
+    System.out.println();
+}
+// LLM 会将 AI 相关内容和体育相关内容分为两个语义完整的 chunk
+```
+
 ## 策略选择指南
 
 | 场景 | 推荐策略 | 说明 |
@@ -346,24 +420,30 @@ for (TextChunk chunk : chunks) {
 | 长篇结构化文档 | CompositeDocumentSplitter | 先按标题分章节，再按长度细分 |
 | 需要精确控制 chunk 长度 | RecursiveCharacterSplitter + TokenMeasure | 按 token 数控制，适配 LLM 上下文窗口 |
 | 包含大量表格/代码 | RecursiveCharacterSplitter 或 CompositeDocumentSplitter | 原子元素保护确保表格/代码不被截断 |
+| 对切分质量要求高、预算允许 LLM 调用 | LlmDocumentSplitter | LLM 语义理解，chunk 质量最优 |
+| 混合格式文档（PDF/Word/HTML/MD） | LlmDocumentSplitter | 统一处理各种格式，不受规则限制 |
 
 ### 决策流程
 
 ```
-文档是否有明确的标题结构？
+是否预算允许 LLM 调用且对切分质量要求高？
   |
-  +-- 是 --> 文档是否很长（单章节超过 LLM 上下文）？
-  |            |
-  |            +-- 是 --> CompositeDocumentSplitter
-  |            |           (primary=Header, secondary=Recursive)
-  |            |
-  |            +-- 否 --> HeaderDocumentSplitter
+  +-- 是 --> LlmDocumentSplitter
   |
-  +-- 否 --> 是否需要语义感知切分？
+  +-- 否 --> 文档是否有明确的标题结构？
                |
-               +-- 是 --> SemanticSplitter
+               +-- 是 --> 文档是否很长（单章节超过 LLM 上下文）？
+               |            |
+               |            +-- 是 --> CompositeDocumentSplitter
+               |            |           (primary=Header, secondary=Recursive)
+               |            |
+               |            +-- 否 --> HeaderDocumentSplitter
                |
-               +-- 否 --> RecursiveCharacterSplitter
+               +-- 否 --> 是否需要语义感知切分？
+                            |
+                            +-- 是 --> SemanticSplitter
+                            |
+                            +-- 否 --> RecursiveCharacterSplitter
 ```
 
 ### 常见配置模板

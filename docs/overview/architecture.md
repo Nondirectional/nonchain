@@ -56,6 +56,7 @@ nonchain 采用分层架构设计，自上而下分为四层：Provider 层、Fr
 │   │  HeaderDocumentSplitter                   │              │
 │   │  SemanticSplitter                         │              │
 │   │  CompositeDocumentSplitter                │              │
+│   │  LlmDocumentSplitter                      │              │
 │   └──────────────────┬───────────────────────┘              │
 │                      │                                       │
 ├──────────────────────┼──────────────────────────────────────┤
@@ -156,11 +157,12 @@ Processing 层负责文档的读取、清洗和切分，将原始文档转化为
 - `DocumentSplitter` — 切分器接口，定义 `split(document)` 方法
 - `TextChunk` — 切分后的文本块值对象，包含内容、元素类型和元数据
 - `ContentMeasure` — 内容度量接口，用于衡量文本长度
-- 4 种切分策略实现：
+- 5 种切分策略实现：
   - `RecursiveCharacterSplitter` — 递归字符切分，按分隔符层级递归拆分，支持 chunk overlap
   - `HeaderDocumentSplitter` — 标题层级切分，基于 Markdown 标题拆分
   - `SemanticSplitter` — 语义切分，基于 Embedding 在话题切换处拆分
   - `CompositeDocumentSplitter` — 组合切分，先结构后字符的二次切分
+  - `LlmDocumentSplitter` — LLM 语义切分，基于 LLM 进行语义清洗和智能切分
 
 ### Storage 层（数据存储）
 
@@ -217,7 +219,7 @@ nonchain 的核心能力均通过 Java 接口定义，实现与使用解耦：
 | `EmbeddingModel` | 文本向量化 | `DashScopeEmbeddingModel` |
 | `DocumentReader` | 文档解析 | `TxtDocumentReader`, `MarkdownDocumentReader`, `HtmlDocumentReader`, `DocxDocumentReader`, `PdfDocumentReader` |
 | `DocumentCleaner` | 文档清洗 | `ControlCharacterRemover`, `UnicodeNormalizer`, 等 |
-| `DocumentSplitter` | 文档切分 | `RecursiveCharacterSplitter`, `HeaderDocumentSplitter`, `SemanticSplitter`, `CompositeDocumentSplitter` |
+| `DocumentSplitter` | 文档切分 | `RecursiveCharacterSplitter`, `HeaderDocumentSplitter`, `SemanticSplitter`, `CompositeDocumentSplitter`, `LlmDocumentSplitter` |
 | `KnowledgeStore` | 知识存储 | `ElasticsearchKnowledgeStore` |
 | `KeywordRetriever` | 关键词检索 | `ElasticsearchBM25Retriever` |
 | `ContentMeasure` | 内容度量 | `CharacterMeasure`, `TokenMeasure` |
