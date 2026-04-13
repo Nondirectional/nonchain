@@ -4,6 +4,15 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.5.4] - 2026-04-13
+
+### 新增
+
+- `DashscopeLLM` 支持 `temperature`、`topP`、`topK` 采样参数，通过链式 setter 配置
+  - `temperature(Double)`：采样温度，控制生成文本多样性，范围 [0, 2)
+  - `topP(Double)`：核采样概率阈值，范围 (0, 1.0]
+  - `topK(Integer)`：候选 Token 数量，非 OpenAI 标准参数，通过 additional body property 传递
+
 ## [0.5.3] - 2026-04-10
 
 ### 新增
