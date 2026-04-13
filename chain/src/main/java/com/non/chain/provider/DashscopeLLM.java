@@ -29,6 +29,9 @@ public class DashscopeLLM implements LLM {
     private final Integer maxCompletionTokens;
     private boolean enableThinking;
     private Integer thinkingBudget;
+    private Double temperature;
+    private Double topP;
+    private Integer topK;
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
 
     public DashscopeLLM(String model) {
@@ -73,6 +76,21 @@ public class DashscopeLLM implements LLM {
 
     public DashscopeLLM enableJsonObjectMode(boolean enable) {
         this.defaultOutputFormat = enable ? OutputFormat.JSON_OBJECT : OutputFormat.TEXT;
+        return this;
+    }
+
+    public DashscopeLLM temperature(Double temperature) {
+        this.temperature = temperature;
+        return this;
+    }
+
+    public DashscopeLLM topP(Double topP) {
+        this.topP = topP;
+        return this;
+    }
+
+    public DashscopeLLM topK(Integer topK) {
+        this.topK = topK;
         return this;
     }
 
@@ -255,6 +273,15 @@ public class DashscopeLLM implements LLM {
             if (thinkingBudget != null) {
                 builder.putAdditionalBodyProperty("thinking_budget", JsonValue.from(thinkingBudget));
             }
+        }
+        if (temperature != null) {
+            builder.temperature(temperature);
+        }
+        if (topP != null) {
+            builder.topP(topP);
+        }
+        if (topK != null) {
+            builder.putAdditionalBodyProperty("top_k", JsonValue.from(topK));
         }
         if (outputFormat == OutputFormat.JSON_OBJECT) {
             builder.responseFormat(
