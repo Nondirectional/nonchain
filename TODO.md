@@ -6,7 +6,7 @@
 
 ## 高优先级（核心能力缺口）
 
-- [ ] **流式输出 (Streaming)** — 当前只有同步 `chat()` 调用，无法逐 token 流式返回，对聊天类应用是刚需
+- [x] **流式输出 (Streaming)** — `streamChat()` 已支持逐 token 流式返回，包含思考内容和工具调用流式
 - [ ] **多 LLM Provider 支持** — 目前只有 DashScope 实现，缺少 OpenAI、Anthropic、Ollama、Gemini 等主流提供商适配
 - [ ] **Prompt 模板系统** — 没有 Prompt 模板管理（变量替换、模板复用），实际开发中大量 prompt 需要参数化
 - [ ] **对话记忆 (Memory)** — 缺少对话历史管理：滑动窗口、摘要记忆、Token 限制裁剪
@@ -15,8 +15,8 @@
 ## 中优先级（开发体验 & 易用性）
 
 - [ ] **RAG 高级封装** — 底层组件齐全，但缺少开箱即用的 RAG Pipeline（retrieve → inject prompt → call LLM）
-- [ ] **回调/可观测性 (Callback & Observability)** — 缺少统一回调机制（onStart、onToken、onComplete）、Token 用量统计、延迟追踪、OpenTelemetry/Micrometer 集成。Graph 引擎已支持 `GraphEvent` 事件回调（GRAPH_START / NODE_START / NODE_END / NODE_ERROR / GRAPH_ERROR / GRAPH_END）
-- [ ] **Agent 高级抽象** — 缺少 ReAct Agent、Plan-and-Execute 等高层 Agent 模式，缺少自动工具循环（LLM 调工具 → 观察结果 → 继续推理）
+- [x] **回调/可观测性 (Callback & Observability)** — `ChainCallback` 统一回调机制已实现，覆盖 LLM/Tool/Retrieval/Graph 的 Start/Complete/Error 生命周期，含 Token 用量统计（`TokenUsage`）、延迟追踪（`latencyMs`）、traceId 关联（`ChainTrace`）和多订阅者组合（`CompositeCallback`）。OpenTelemetry/Micrometer 集成仍为 out-of-scope
+- [x] **Agent 高级抽象** — 基础 Agent 自动工具循环已实现（`Agent` 类，LLM 调工具 → 观察结果 → 继续推理）。ReAct Agent、Plan-and-Execute 等高层 Agent 模式仍待实现
 - [ ] **重试 & 容错** — 缺少内置重试机制（Rate Limit 429、网络超时）、fallback 主备切换、速率限制器
 - [ ] **响应缓存** — 缺少 LLM 响应缓存（相同 prompt 不重复调用），降低开发调试成本
 

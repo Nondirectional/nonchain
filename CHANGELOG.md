@@ -4,6 +4,33 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.6.0] - 2026-04-14
+
+### 新增
+
+- `ChainCallback` 统一回调接口：覆盖 LLM、Tool、Retrieval、Graph 四大组件的 Start/Complete/Error 生命周期事件
+  - 所有方法均有 default no-op 实现，用户可选择性实现感兴趣的回调
+- 事件模型（`callback/event/` 包）：`LlmStartEvent`、`LlmCompleteEvent`、`LlmErrorEvent`、`ToolStartEvent`、`ToolCompleteEvent`、`ToolErrorEvent`、`RetrievalStartEvent`、`RetrievalCompleteEvent`、`RetrievalErrorEvent`
+  - Complete 事件包含耗时（`latencyMs`），LLM Complete 事件包含 `TokenUsage`
+- `ChainTrace`：基于 ThreadLocal 的 traceId 管理，Agent 自动为同一次迭代的 LLM + Tool 调用关联相同 traceId
+- `CompositeCallback`：多订阅者组合回调，每个回调异常独立捕获，不中断其他回调和主流程
+- `ChainContext`：共享上下文，持有 callback 引用，可注入到各组件
+- 各组件 Builder 同时支持 `.callback(ChainCallback)` 和 `.chainContext(ChainContext)` 两种注册方式
+- `ChainCallbackTest`：10 个集成测试覆盖 Agent 回调、Graph 桥接、多订阅者、异常隔离、traceId 关联等场景
+
+### 变更
+
+- `Agent` 移除 `logger(Consumer<String>)`，由 `ChainCallback` 替代
+- `Graph.Builder` 新增 `callback()` 和 `chainContext()` 方法，Graph 事件同时通过 ChainCallback 发出
+- `DashscopeLLM` 新增带 `ChainCallback` 的构造函数和 `fromContext()` 静态工厂方法
+- `ToolRegistry` 新增带 `ChainCallback` 和 `ChainContext` 的构造函数
+- `ElasticsearchKnowledgeStore.Builder` 新增 `callback()` 和 `chainContext()` 方法
+- `AgentLoopExample` 更新为使用 `ChainCallback` 替代 `logger`
+
+### 破坏性变更
+
+- `Agent.logger(Consumer<String>)` 已移除，需迁移到 `Agent.builder().callback(ChainCallback)`
+
 ## [0.5.5] - 2026-04-13
 
 ### 新增

@@ -7,13 +7,14 @@
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，已支持阿里云 DashScope
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
-- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持日志回调
+- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
 - **文档切分** — 5 种切分策略：递归字符、标题层级、语义、组合切分、LLM 语义切分
 - **统一检索** — Elasticsearch 单独承担向量检索、BM25 与混合检索，支持元数据过滤和 RRF / Linear 融合策略
 - **上下文扩展** — 命中 chunk 后基于 chunkIndex 向前后扩展邻居 chunk，补齐上下文窗口
+- **统一回调 (ChainCallback)** — 覆盖 LLM、Tool、Retrieval、Graph 的 Start/Complete/Error 生命周期，支持 traceId 关联和多订阅者组合
 - **结构化输出** — 支持 JSON Object 响应格式
 
 ## 要求
@@ -130,11 +131,21 @@ registry.register("get_weather", "获取城市天气")
 // 注册工具
 ToolRegistry registry = new ToolRegistry().scan(new WeatherService());
 
-// 构建 Agent
+// 构建 Agent（可选：通过 ChainCallback 观察执行过程）
+ChainCallback callback = new ChainCallback() {
+    @Override
+    public void onLlmComplete(LlmCompleteEvent event) {
+        System.out.println("[LLM] 耗时: " + event.latencyMs() + "ms");
+    }
+    @Override
+    public void onToolComplete(ToolCompleteEvent event) {
+        System.out.println("[Tool] " + event.toolName() + " → " + event.result());
+    }
+};
 Agent agent = Agent.builder(llm, registry)
         .systemPrompt("你是一个旅行助手")
         .maxIterations(5)
-        .logger(System.out::println)   // 可选：观察执行过程
+        .callback(callback)
         .build();
 
 // 一行搞定：自动循环调用工具直到完成
@@ -273,7 +284,7 @@ for (SearchResult result : response.results()) {
 
 | 模块 | 说明 |
 |------|------|
-| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、知识存储接口、文档模型、Embedding、多模态消息 |
+| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、统一回调 (ChainCallback)、知识存储接口、文档模型、Embedding、多模态消息 |
 | `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 5 种文档切分策略 |
 | `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、原生 retriever 混合检索 |
 | `chain-example` | 示例代码（可运行 Demo） |
