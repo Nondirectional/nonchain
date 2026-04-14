@@ -4,6 +4,15 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.6.1] - 2026-04-14
+
+### 修复
+
+- `ChatResult` 新增 `TokenUsage tokenUsage` 字段，从 LLM 响应中提取实际 token 用量
+- `DashscopeLLM.doChat()` 从 `ChatCompletion.usage()` 提取 token 用量传入 ChatResult
+- `DashscopeLLM.doStreamChat()` 从流式响应最后一个 chunk 提取 token 用量
+- `doChatWithCallback()` 和 `doStreamChatWithCallback()` 将 `result.tokenUsage()` 传入 `LlmCompleteEvent`，替代原来硬编码的 `null`
+
 ## [0.6.0] - 2026-04-14
 
 ### 新增
