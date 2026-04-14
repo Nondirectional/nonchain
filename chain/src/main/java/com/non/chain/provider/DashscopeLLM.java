@@ -316,13 +316,17 @@ public class DashscopeLLM implements LLM {
 
         ChatCompletion completion = client.chat().completions().create(builder.build());
 
+        TokenUsage usage = completion.usage()
+                .map(u -> new TokenUsage(u.promptTokens(), u.completionTokens(), u.totalTokens()))
+                .orElse(null);
+
         return completion.choices().stream()
                 .findFirst()
                 .map(choice -> {
                     String content = choice.message().content().orElse("无响应");
                     String thinking = extractThinking(choice.message());
                     List<ToolCall> toolCalls = extractToolCalls(choice.message());
-                    return new ChatResult(content, thinking, toolCalls);
+                    return new ChatResult(content, thinking, toolCalls, usage);
                 })
                 .orElse(new ChatResult("无响应", null));
     }
@@ -340,7 +344,7 @@ public class DashscopeLLM implements LLM {
         try {
             ChatResult result = doChat(builder, resolvedOutputFormat);
             long latencyMs = System.currentTimeMillis() - start;
-            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, result.tokenUsage(), latencyMs));
             return result;
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - start;
@@ -363,7 +367,7 @@ public class DashscopeLLM implements LLM {
         try {
             ChatResult result = doStreamChat(builder, resolvedOutputFormat, streamCallback);
             long latencyMs = System.currentTimeMillis() - start;
-            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, result.tokenUsage(), latencyMs));
             return result;
         } catch (Exception e) {
             long latencyMs = System.currentTimeMillis() - start;
@@ -378,10 +382,13 @@ public class DashscopeLLM implements LLM {
         StringBuilder contentBuilder = new StringBuilder();
         StringBuilder thinkingBuilder = new StringBuilder();
         Map<Integer, ToolCallAccumulator> toolCallAccumulators = new TreeMap<>();
+        final com.openai.models.completions.CompletionUsage[] lastUsage = {null};
 
         try (StreamResponse<ChatCompletionChunk> streamResponse =
                      client.chat().completions().createStreaming(builder.build())) {
             streamResponse.stream().forEach(chunk -> {
+                chunk.usage().ifPresent(u -> lastUsage[0] = u);
+
                 chunk.choices().stream().findFirst().ifPresent(choice -> {
                     ChatCompletionChunk.Choice.Delta delta = choice.delta();
                     String deltaContent = delta.content().orElse(null);
@@ -419,7 +426,11 @@ public class DashscopeLLM implements LLM {
             toolCalls.add(acc.toToolCall());
         }
 
-        return new ChatResult(contentBuilder.toString(), thinkingBuilder.toString(), toolCalls);
+        TokenUsage tokenUsage = lastUsage[0] != null
+                ? new TokenUsage(lastUsage[0].promptTokens(), lastUsage[0].completionTokens(), lastUsage[0].totalTokens())
+                : null;
+
+        return new ChatResult(contentBuilder.toString(), thinkingBuilder.toString(), toolCalls, tokenUsage);
     }
 
     private String extractThinking(ChatCompletionMessage message) {

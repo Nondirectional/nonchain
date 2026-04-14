@@ -1,5 +1,6 @@
 package com.non.chain;
 
+import com.non.chain.callback.event.TokenUsage;
 import com.non.chain.tool.ToolCall;
 
 import java.util.Collections;
@@ -10,15 +11,21 @@ public class ChatResult {
     private final String content;
     private final String thinkingContent;
     private final List<ToolCall> toolCalls;
+    private final TokenUsage tokenUsage;
 
     public ChatResult(String content, String thinkingContent) {
-        this(content, thinkingContent, Collections.emptyList());
+        this(content, thinkingContent, Collections.emptyList(), null);
     }
 
     public ChatResult(String content, String thinkingContent, List<ToolCall> toolCalls) {
+        this(content, thinkingContent, toolCalls, null);
+    }
+
+    public ChatResult(String content, String thinkingContent, List<ToolCall> toolCalls, TokenUsage tokenUsage) {
         this.content = content;
         this.thinkingContent = thinkingContent;
         this.toolCalls = toolCalls != null ? toolCalls : Collections.emptyList();
+        this.tokenUsage = tokenUsage;
     }
 
     public String content() {
@@ -31,6 +38,10 @@ public class ChatResult {
 
     public List<ToolCall> toolCalls() {
         return toolCalls;
+    }
+
+    public TokenUsage tokenUsage() {
+        return tokenUsage;
     }
 
     public boolean hasThinking() {
