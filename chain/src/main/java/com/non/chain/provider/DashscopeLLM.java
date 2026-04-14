@@ -1,6 +1,14 @@
 package com.non.chain.provider;
 
 import com.non.chain.*;
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.ChainCallbackUtil;
+import com.non.chain.callback.ChainContext;
+import com.non.chain.callback.ChainTrace;
+import com.non.chain.callback.event.LlmCompleteEvent;
+import com.non.chain.callback.event.LlmErrorEvent;
+import com.non.chain.callback.event.LlmStartEvent;
+import com.non.chain.callback.event.TokenUsage;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.openai.client.OpenAIClient;
@@ -27,6 +35,7 @@ public class DashscopeLLM implements LLM {
     private final OpenAIClient client;
     private final String model;
     private final Integer maxCompletionTokens;
+    private final ChainCallback callback;
     private boolean enableThinking;
     private Integer thinkingBudget;
     private Double temperature;
@@ -35,20 +44,32 @@ public class DashscopeLLM implements LLM {
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
 
     public DashscopeLLM(String model) {
-        this(null, model, null);
+        this(null, model, null, null);
     }
 
     public DashscopeLLM(String model, Integer maxCompletionTokens) {
-        this(null, model, maxCompletionTokens);
+        this(null, model, maxCompletionTokens, null);
     }
 
     public DashscopeLLM(String apiKey, String model, Integer maxCompletionTokens) {
+        this(apiKey, model, maxCompletionTokens, null);
+    }
+
+    public DashscopeLLM(String apiKey, String model, Integer maxCompletionTokens, ChainCallback callback) {
         this.client = OpenAIOkHttpClient.builder()
                 .apiKey(resolveApiKey(apiKey))
                 .baseUrl(DEFAULT_BASE_URL)
                 .build();
         this.model = model;
         this.maxCompletionTokens = maxCompletionTokens;
+        this.callback = callback != null ? callback : ChainCallbackUtil.noop();
+    }
+
+    /**
+     * 通过 ChainContext 构造
+     */
+    public static DashscopeLLM fromContext(String apiKey, String model, Integer maxCompletionTokens, ChainContext chainContext) {
+        return new DashscopeLLM(apiKey, model, maxCompletionTokens, chainContext != null ? chainContext.callback() : null);
     }
 
     private static String resolveApiKey(String explicitApiKey) {
@@ -108,20 +129,19 @@ public class DashscopeLLM implements LLM {
 
     @Override
     public ChatResult chat(String systemMessage, String userMessage, List<Tool> tools, OutputFormat outputFormat) {
-        ChatCompletionCreateParams.Builder builder = buildSimpleParams(systemMessage, userMessage);
-        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
-        validateResponseFormatAndTools(tools, resolvedOutputFormat);
-        addTools(builder, tools);
-        return doChat(builder, resolvedOutputFormat);
+        List<Message> messages = new ArrayList<>();
+        if (systemMessage != null && !systemMessage.isBlank()) {
+            messages.add(Message.system(systemMessage));
+        }
+        messages.add(Message.user(userMessage));
+        return doChatWithCallback(messages, tools, outputFormat,
+                buildSimpleParams(systemMessage, userMessage));
     }
 
     @Override
     public ChatResult chat(List<Message> messages, List<Tool> tools, OutputFormat outputFormat) {
-        ChatCompletionCreateParams.Builder builder = buildMessageListParams(messages);
-        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
-        validateResponseFormatAndTools(tools, resolvedOutputFormat);
-        addTools(builder, tools);
-        return doChat(builder, resolvedOutputFormat);
+        return doChatWithCallback(messages, tools, outputFormat,
+                buildMessageListParams(messages));
     }
 
     // ---- 流式调用 ----
@@ -138,20 +158,19 @@ public class DashscopeLLM implements LLM {
 
     @Override
     public ChatResult streamChat(String systemMessage, String userMessage, List<Tool> tools, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
-        ChatCompletionCreateParams.Builder builder = buildSimpleParams(systemMessage, userMessage);
-        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
-        validateResponseFormatAndTools(tools, resolvedOutputFormat);
-        addTools(builder, tools);
-        return doStreamChat(builder, resolvedOutputFormat, callback);
+        List<Message> messages = new ArrayList<>();
+        if (systemMessage != null && !systemMessage.isBlank()) {
+            messages.add(Message.system(systemMessage));
+        }
+        messages.add(Message.user(userMessage));
+        return doStreamChatWithCallback(messages, tools, outputFormat, callback,
+                buildSimpleParams(systemMessage, userMessage));
     }
 
     @Override
     public ChatResult streamChat(List<Message> messages, List<Tool> tools, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
-        ChatCompletionCreateParams.Builder builder = buildMessageListParams(messages);
-        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
-        validateResponseFormatAndTools(tools, resolvedOutputFormat);
-        addTools(builder, tools);
-        return doStreamChat(builder, resolvedOutputFormat, callback);
+        return doStreamChatWithCallback(messages, tools, outputFormat, callback,
+                buildMessageListParams(messages));
     }
 
     // ---- 内部方法 ----
@@ -306,6 +325,51 @@ public class DashscopeLLM implements LLM {
                     return new ChatResult(content, thinking, toolCalls);
                 })
                 .orElse(new ChatResult("无响应", null));
+    }
+
+    private ChatResult doChatWithCallback(List<Message> messages, List<Tool> tools, OutputFormat outputFormat,
+                                          ChatCompletionCreateParams.Builder builder) {
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
+        addTools(builder, tools);
+
+        String traceId = ChainTrace.get();
+        callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
+
+        long start = System.currentTimeMillis();
+        try {
+            ChatResult result = doChat(builder, resolvedOutputFormat);
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+            return result;
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+            throw e;
+        }
+    }
+
+    private ChatResult doStreamChatWithCallback(List<Message> messages, List<Tool> tools, OutputFormat outputFormat,
+                                                Consumer<ChatChunk> streamCallback,
+                                                ChatCompletionCreateParams.Builder builder) {
+        OutputFormat resolvedOutputFormat = resolveOutputFormat(outputFormat);
+        validateResponseFormatAndTools(tools, resolvedOutputFormat);
+        addTools(builder, tools);
+
+        String traceId = ChainTrace.get();
+        callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
+
+        long start = System.currentTimeMillis();
+        try {
+            ChatResult result = doStreamChat(builder, resolvedOutputFormat, streamCallback);
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+            return result;
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+            throw e;
+        }
     }
 
     private ChatResult doStreamChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat, Consumer<ChatChunk> callback) {

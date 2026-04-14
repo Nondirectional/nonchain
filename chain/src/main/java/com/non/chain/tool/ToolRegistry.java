@@ -1,6 +1,14 @@
 package com.non.chain.tool;
 
 
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.ChainCallbackUtil;
+import com.non.chain.callback.ChainContext;
+import com.non.chain.callback.ChainTrace;
+import com.non.chain.callback.event.ToolCompleteEvent;
+import com.non.chain.callback.event.ToolErrorEvent;
+import com.non.chain.callback.event.ToolStartEvent;
+
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.*;
@@ -12,6 +20,19 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ToolRegistry {
 
     private final Map<String, ToolEntry> entries = new ConcurrentHashMap<>();
+    private final ChainCallback callback;
+
+    public ToolRegistry() {
+        this.callback = ChainCallbackUtil.noop();
+    }
+
+    public ToolRegistry(ChainCallback callback) {
+        this.callback = callback != null ? callback : ChainCallbackUtil.noop();
+    }
+
+    public ToolRegistry(ChainContext chainContext) {
+        this.callback = chainContext != null ? chainContext.callback() : ChainCallbackUtil.noop();
+    }
 
     /**
      * Fluent API 入口：手动注册工具
@@ -87,14 +108,30 @@ public class ToolRegistry {
             throw new IllegalArgumentException("未注册的工具: " + name);
         }
 
+        String traceId = ChainTrace.get();
+        ToolCall toolCall = new ToolCall(null, name, arguments);
+        callback.onToolStart(new ToolStartEvent(traceId, toolCall));
+
+        long start = System.currentTimeMillis();
+        try {
+            String result = doExecute(entry, arguments);
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onToolComplete(new ToolCompleteEvent(traceId, null, name, result, latencyMs));
+            return result;
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onToolError(new ToolErrorEvent(traceId, null, name, arguments, e, latencyMs));
+            throw e;
+        }
+    }
+
+    private String doExecute(ToolEntry entry, String arguments) {
         Map<String, Object> parsedArgs = parseSimpleJson(arguments);
 
         if (entry.handler != null) {
-            // fluent 方式：直接调用 handler
             return entry.handler.execute(new ToolArgs(parsedArgs));
         }
 
-        // 注解方式：反射调用
         Parameter[] params = entry.method.getParameters();
         Object[] callArgs = new Object[params.length];
 
@@ -109,7 +146,7 @@ public class ToolRegistry {
             Object result = entry.method.invoke(entry.target, callArgs);
             return result != null ? result.toString() : "null";
         } catch (Exception e) {
-            throw new RuntimeException("工具执行失败: " + name, e.getCause() != null ? e.getCause() : e);
+            throw new RuntimeException("工具执行失败: " + entry.name, e.getCause() != null ? e.getCause() : e);
         }
     }
 

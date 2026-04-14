@@ -2,6 +2,9 @@ package com.non.chain.example;
 
 import com.non.chain.ChatResult;
 import com.non.chain.agent.Agent;
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.event.LlmCompleteEvent;
+import com.non.chain.callback.event.ToolCompleteEvent;
 import com.non.chain.provider.DashscopeLLM;
 import com.non.chain.provider.LLM;
 import com.non.chain.tool.*;
@@ -97,11 +100,23 @@ public class AgentLoopExample {
         // 使用注解方式注册工具
         ToolRegistry registry = new ToolRegistry().scan(new TravelTools());
 
-        // 构建 Agent（启用日志回调观察执行过程）
+        // 构建 Agent（启用 ChainCallback 观察执行过程）
+        ChainCallback callback = new ChainCallback() {
+            @Override
+            public void onLlmComplete(LlmCompleteEvent event) {
+                System.out.println("[LLM] 耗时: " + event.latencyMs() + "ms");
+            }
+
+            @Override
+            public void onToolComplete(ToolCompleteEvent event) {
+                System.out.println("[Tool] " + event.toolName() + " 耗时: " + event.latencyMs() + "ms → " + event.result());
+            }
+        };
+
         Agent agent = Agent.builder(llm, registry)
                 .systemPrompt("你是一个旅行助手。根据用户问题，主动调用工具查询天气、汇率等信息，给出实用建议。")
                 .maxIterations(5)
-                .logger(System.out::println)
+                .callback(callback)
                 .build();
 
         // 测试 1：多步骤问题（需要 agent 自动循环调用多个工具）

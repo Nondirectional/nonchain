@@ -2,6 +2,16 @@ package com.non.chain.agent;
 
 import com.non.chain.ChatResult;
 import com.non.chain.Message;
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.ChainCallbackUtil;
+import com.non.chain.callback.ChainContext;
+import com.non.chain.callback.ChainTrace;
+import com.non.chain.callback.event.LlmCompleteEvent;
+import com.non.chain.callback.event.LlmErrorEvent;
+import com.non.chain.callback.event.LlmStartEvent;
+import com.non.chain.callback.event.ToolCompleteEvent;
+import com.non.chain.callback.event.ToolErrorEvent;
+import com.non.chain.callback.event.ToolStartEvent;
 import com.non.chain.provider.LLM;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
@@ -9,7 +19,6 @@ import com.non.chain.tool.ToolRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.Consumer;
 
 /**
  * Agent：LLM + 工具循环
@@ -21,6 +30,7 @@ import java.util.function.Consumer;
  * Agent agent = Agent.builder(llm, toolRegistry)
  *     .systemPrompt("你是一个助手")
  *     .maxIterations(10)
+ *     .callback(new LoggingCallback())
  *     .build();
  *
  * ChatResult result = agent.run("北京天气怎么样？");
@@ -35,14 +45,14 @@ public class Agent {
     private final ToolRegistry toolRegistry;
     private final String systemPrompt;
     private final int maxIterations;
-    private final Consumer<String> logger;
+    private final ChainCallback callback;
 
     private Agent(Builder builder) {
         this.llm = builder.llm;
         this.toolRegistry = builder.toolRegistry;
         this.systemPrompt = builder.systemPrompt;
         this.maxIterations = builder.maxIterations;
-        this.logger = builder.logger;
+        this.callback = builder.callback;
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -69,22 +79,40 @@ public class Agent {
     }
 
     private ChatResult runWithLoop(List<Message> messages) {
+        String traceId = ChainTrace.generate();
+        ChainTrace.set(traceId);
+        try {
+            return doRunWithLoop(messages);
+        } finally {
+            ChainTrace.clear();
+        }
+    }
+
+    private ChatResult doRunWithLoop(List<Message> messages) {
         List<Tool> tools = toolRegistry.getTools();
+        String traceId = ChainTrace.get();
 
         for (int i = 0; i < maxIterations; i++) {
-            log("[迭代 %d] 调用 LLM...", i + 1);
-            ChatResult result = llm.chat(messages, tools);
+            callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
+            ChatResult result;
+            long start = System.currentTimeMillis();
+            try {
+                result = llm.chat(messages, tools);
+                long latencyMs = System.currentTimeMillis() - start;
+                callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+            } catch (Exception e) {
+                long latencyMs = System.currentTimeMillis() - start;
+                callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+                throw e;
+            }
             messages.add(result.toMessage());
 
             if (!result.hasToolCalls()) {
-                log("[迭代 %d] LLM 返回最终回复", i + 1);
                 return result;
             }
 
             for (ToolCall tc : result.toolCalls()) {
-                log("[迭代 %d] 调用工具: %s(%s)", i + 1, tc.name(), tc.arguments());
-                String output = safeExecute(tc);
-                log("[迭代 %d] 工具结果: %s", i + 1, output);
+                String output = safeExecute(tc, traceId);
                 messages.add(Message.toolResult(tc.id(), output));
             }
         }
@@ -92,19 +120,20 @@ public class Agent {
         throw new AgentException("超出最大迭代次数: " + maxIterations);
     }
 
-    private void log(String format, Object... args) {
-        if (logger != null) {
-            logger.accept(String.format(format, args));
-        }
-    }
-
     /**
      * 安全执行工具调用，捕获异常后将错误信息传回 LLM
      */
-    private String safeExecute(ToolCall tc) {
+    private String safeExecute(ToolCall tc, String traceId) {
+        callback.onToolStart(new ToolStartEvent(traceId, tc));
+        long start = System.currentTimeMillis();
         try {
-            return toolRegistry.execute(tc.name(), tc.arguments());
+            String result = toolRegistry.execute(tc.name(), tc.arguments());
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onToolComplete(new ToolCompleteEvent(traceId, tc.id(), tc.name(), result, latencyMs));
+            return result;
         } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onToolError(new ToolErrorEvent(traceId, tc.id(), tc.name(), tc.arguments(), e, latencyMs));
             return "工具执行失败: " + e.getMessage();
         }
     }
@@ -115,7 +144,7 @@ public class Agent {
         private final ToolRegistry toolRegistry;
         private String systemPrompt;
         private int maxIterations = DEFAULT_MAX_ITERATIONS;
-        private Consumer<String> logger;
+        private ChainCallback callback;
 
         private Builder(LLM llm, ToolRegistry toolRegistry) {
             this.llm = llm;
@@ -133,18 +162,36 @@ public class Agent {
         }
 
         /**
-         * 设置日志回调，用于观察 agent loop 的执行过程
+         * 设置回调，用于观察 agent 及内部 LLM/Tool 的执行过程
          *
          * <pre>{@code
-         * .logger(System.out::println)
+         * .callback(new ChainCallback() {
+         *     @Override
+         *     public void onLlmComplete(LlmCompleteEvent event) {
+         *         System.out.println("LLM 耗时: " + event.latencyMs() + "ms");
+         *     }
+         * })
          * }</pre>
          */
-        public Builder logger(Consumer<String> logger) {
-            this.logger = logger;
+        public Builder callback(ChainCallback callback) {
+            this.callback = callback;
+            return this;
+        }
+
+        /**
+         * 通过 ChainContext 注入回调
+         */
+        public Builder chainContext(ChainContext chainContext) {
+            if (chainContext != null && this.callback == null) {
+                this.callback = chainContext.callback();
+            }
             return this;
         }
 
         public Agent build() {
+            if (callback == null) {
+                callback = ChainCallbackUtil.noop();
+            }
             return new Agent(this);
         }
     }

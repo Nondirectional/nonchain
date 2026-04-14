@@ -1,9 +1,8 @@
 package com.non.chain.flow;
 
-import com.non.chain.flow.Edge;
-import com.non.chain.flow.GraphResult;
-import com.non.chain.flow.Node;
-import com.non.chain.flow.State;
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.ChainCallbackUtil;
+import com.non.chain.callback.ChainContext;
 
 import java.util.*;
 import java.util.function.Consumer;
@@ -17,13 +16,16 @@ public class Graph {
     private final Map<String, Node> nodes;
     private final Map<String, Edge> edges;
     private final Consumer<GraphEvent> onEvent;
+    private final ChainCallback callback;
 
-    private Graph(String name, String startNode, Map<String, Node> nodes, Map<String, Edge> edges, Consumer<GraphEvent> onEvent) {
+    private Graph(String name, String startNode, Map<String, Node> nodes, Map<String, Edge> edges,
+                  Consumer<GraphEvent> onEvent, ChainCallback callback) {
         this.name = name;
         this.startNode = startNode;
         this.nodes = nodes;
         this.edges = edges;
         this.onEvent = onEvent;
+        this.callback = callback;
     }
 
     public String name() {
@@ -89,6 +91,13 @@ public class Graph {
         if (onEvent != null) {
             onEvent.accept(event);
         }
+        if (callback != null) {
+            try {
+                callback.onGraphEvent(event);
+            } catch (Exception ignored) {
+                // 回调异常不应中断主流程
+            }
+        }
     }
 
     public static Builder builder(String name) {
@@ -101,6 +110,7 @@ public class Graph {
         private final Map<String, Node> nodes = new LinkedHashMap<>();
         private final Map<String, Edge> edges = new HashMap<>();
         private Consumer<GraphEvent> onEvent;
+        private ChainCallback callback;
 
         private Builder(String name) {
             this.name = name;
@@ -126,6 +136,24 @@ public class Graph {
             return this;
         }
 
+        /**
+         * 设置 ChainCallback，Graph 事件将同时通过此回调发出
+         */
+        public Builder callback(ChainCallback callback) {
+            this.callback = callback;
+            return this;
+        }
+
+        /**
+         * 通过 ChainContext 注入回调
+         */
+        public Builder chainContext(ChainContext chainContext) {
+            if (chainContext != null && this.callback == null) {
+                this.callback = chainContext.callback();
+            }
+            return this;
+        }
+
         public Graph build() {
             if (nodes.isEmpty()) {
                 throw new IllegalStateException("Graph 必须包含至少一个 Node");
@@ -133,7 +161,8 @@ public class Graph {
             if (startNode == null) {
                 throw new IllegalStateException("必须指定起始节点");
             }
-            return new Graph(name, startNode, nodes, edges, onEvent);
+            return new Graph(name, startNode, nodes, edges, onEvent,
+                    callback != null ? callback : ChainCallbackUtil.noop());
         }
     }
 }

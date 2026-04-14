@@ -27,6 +27,13 @@ import com.non.chain.knowledge.RetrievalMode;
 import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
 import com.non.chain.knowledge.SearchResult;
+import com.non.chain.callback.ChainCallback;
+import com.non.chain.callback.ChainCallbackUtil;
+import com.non.chain.callback.ChainContext;
+import com.non.chain.callback.ChainTrace;
+import com.non.chain.callback.event.RetrievalCompleteEvent;
+import com.non.chain.callback.event.RetrievalErrorEvent;
+import com.non.chain.callback.event.RetrievalStartEvent;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -46,12 +53,14 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
     private final String indexName;
     private final int dims;
     private final ElasticsearchSearchSupport support;
+    private final ChainCallback callback;
 
     private ElasticsearchKnowledgeStore(Builder builder) {
         this.client = builder.client;
         this.indexName = builder.indexName;
         this.dims = builder.dims;
         this.support = new ElasticsearchSearchSupport(builder.client, ElasticsearchSearchSupport.DEFAULT_ANALYZER);
+        this.callback = builder.callback != null ? builder.callback : ChainCallbackUtil.noop();
         ensureIndexExists();
     }
 
@@ -94,14 +103,32 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
 
     @Override
     public RetrievalResponse search(SearchRequest request) {
-        switch (request.mode()) {
-            case BM25:
-                return createBM25Retriever().search(request);
-            case HYBRID:
-                return createHybridRetriever().search(request);
-            case KNN:
-            default:
-                return searchKnn(request);
+        String traceId = ChainTrace.get();
+        callback.onRetrievalStart(new RetrievalStartEvent(traceId, request));
+
+        long start = System.currentTimeMillis();
+        try {
+            RetrievalResponse response;
+            switch (request.mode()) {
+                case BM25:
+                    response = createBM25Retriever().search(request);
+                    break;
+                case HYBRID:
+                    response = createHybridRetriever().search(request);
+                    break;
+                case KNN:
+                default:
+                    response = searchKnn(request);
+                    break;
+            }
+            long latencyMs = System.currentTimeMillis() - start;
+            int hitCount = response.results().size();
+            callback.onRetrievalComplete(new RetrievalCompleteEvent(traceId, response, hitCount, latencyMs));
+            return response;
+        } catch (Exception e) {
+            long latencyMs = System.currentTimeMillis() - start;
+            callback.onRetrievalError(new RetrievalErrorEvent(traceId, request, e, latencyMs));
+            throw e;
         }
     }
 
@@ -396,6 +423,7 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         private final ElasticsearchClient client;
         private final int dims;
         private String indexName = "knowledge_chunks";
+        private ChainCallback callback;
 
         private Builder(ElasticsearchClient client, int dims) {
             this.client = client;
@@ -404,6 +432,18 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
 
         public Builder indexName(String indexName) {
             this.indexName = indexName;
+            return this;
+        }
+
+        public Builder callback(ChainCallback callback) {
+            this.callback = callback;
+            return this;
+        }
+
+        public Builder chainContext(ChainContext chainContext) {
+            if (chainContext != null && this.callback == null) {
+                this.callback = chainContext.callback();
+            }
             return this;
         }
 
