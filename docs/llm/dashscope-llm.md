@@ -253,16 +253,17 @@ LLM llm2 = new DashscopeLLM("sk-xxx", "qwen-plus", 256);
 
 ## 底层实现
 
-`DashscopeLLM` 基于 OpenAI Java SDK 的 `OpenAIOkHttpClient` 实现，默认使用 DashScope 的 OpenAI 兼容端点：
+`DashscopeLLM` 继承自 `AbstractOpenAILLM`，基于 OpenAI Java SDK 的 `OpenAIOkHttpClient` 实现，默认使用 DashScope 的 OpenAI 兼容端点：
 
 ```
 https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-思考模式通过在请求体中添加 `enable_thinking` 和 `thinking_budget` 扩展字段实现，结构化输出通过 `response_format` 参数设置为 `json_object` 实现。`temperature` 和 `topP` 通过 OpenAI SDK 标准参数传递，`topK` 通过 `additionalBodyProperty` 传递（非 OpenAI 标准参数）。建议 `temperature` 和 `topP` 只设置其中一个。
+思考模式通过在请求体中添加 `enable_thinking` 和 `thinking_budget` 扩展字段实现，结构化输出通过 `response_format` 参数设置为 `json_object` 实现。`temperature` 和 `topP` 通过 OpenAI SDK 标准参数传递，`topK` 通过 `additionalBodyProperty` 传递（非 OpenAI 标准参数，DashScope 特有）。建议 `temperature` 和 `topP` 只设置其中一个。
 
 ## 相关文档
 
+- [OpenAICompatibleLLM](./openai-compatible-llm.md) - 通用 OpenAI 兼容 provider（vllm、Ollama 等）
 - [Message 消息模型](./message.md) - 消息类型与 ChatResult
 - [多模态输入](./multimodal.md) - 图片理解功能
 - [结构化输出](./structured-output.md) - JSON 结构化输出详解

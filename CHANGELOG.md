@@ -4,6 +4,23 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.1] - 2026-04-15
+
+### 新增
+
+- 多 LLM Provider 架构：提取 OpenAI 兼容通用基类，支持 vllm-openai、Ollama、LiteLLM 等任何 OpenAI 兼容端点
+  - `AbstractOpenAILLM`：抽象基类，封装 OpenAI Chat Completions API 全部通用逻辑（消息构建、工具调用、流式响应、思考模式、回调）
+  - `OpenAICompatibleLLM`：通用 provider，base URL 和 API Key 完全可配置，API Key 可选（内网无认证场景）
+  - `OpenAICompatibleEmbeddingModel`：通用 Embedding provider，base URL 完全可配置
+  - `AbstractOpenAIEmbeddingModel`：Embedding 抽象基类
+- 新增 `docs/llm/openai-compatible-llm.md` 文档：通用 provider 使用指南
+
+### 变更
+
+- `DashscopeLLM` 重构为继承 `AbstractOpenAILLM`（538行 → 100行），保留 DashScope 特有的 `topK` 参数和 API Key 解析逻辑
+- `DashScopeEmbeddingModel` 重构为继承 `AbstractOpenAIEmbeddingModel`（110行 → 40行）
+- 所有 DashScope 公共 API 保持向后兼容
+
 ## [0.7.0] - 2026-04-15
 
 ### 新增

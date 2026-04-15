@@ -358,7 +358,32 @@ nonchain 的接口驱动设计使得扩展新能力非常直接：
 
 ### 添加新的 LLM Provider
 
-实现 `LLM` 接口即可接入新的模型服务：
+nonchain 提供了 `AbstractOpenAILLM` 抽象基类，封装了 OpenAI Chat Completions API 的通用逻辑。对于兼容 OpenAI 协议的服务（如 vllm-openai、Ollama、LiteLLM），可以直接使用 `OpenAICompatibleLLM`：
+
+```java
+// 直接使用通用 provider 连接任何 OpenAI 兼容端点
+LLM llm = new OpenAICompatibleLLM("http://10.100.10.21:40000/v1", "qwen3-14b")
+    .temperature(0.7)
+    .enableThinking(true);
+```
+
+对于有特殊参数的服务，可以继承 `AbstractOpenAILLM`：
+
+```java
+public class MyCustomLLM extends AbstractOpenAILLM {
+    public MyCustomLLM(String baseUrl, String model) {
+        super(baseUrl, "my-api-key", model, null, null);
+    }
+
+    @Override
+    protected void applyAdditionalParams(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
+        super.applyAdditionalParams(builder, outputFormat);
+        // 添加自定义参数
+    }
+}
+```
+
+也可以直接实现 `LLM` 接口接入非 OpenAI 协议的服务：
 
 ```java
 public class MyCustomLLM implements LLM {

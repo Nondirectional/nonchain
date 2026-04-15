@@ -7,7 +7,7 @@
 ## 高优先级（核心能力缺口）
 
 - [x] **流式输出 (Streaming)** — `streamChat()` 已支持逐 token 流式返回，包含思考内容和工具调用流式
-- [ ] **多 LLM Provider 支持** — 目前只有 DashScope 实现，缺少 OpenAI、Anthropic、Ollama、Gemini 等主流提供商适配
+- [x] **多 LLM Provider 支持** — 已通过 `AbstractOpenAILLM` 抽象基类 + `OpenAICompatibleLLM` 通用 provider 实现多 Provider 架构，支持 vllm-openai、Ollama、LiteLLM 等任何 OpenAI 兼容端点。DashScope 已重构为子类
 - [ ] **Prompt 模板系统** — 没有 Prompt 模板管理（变量替换、模板复用），实际开发中大量 prompt 需要参数化
 - [x] **对话记忆 (Memory)** — ChatMemory 策略接口 + ChatMemoryStore 存储接口，内置滑动窗口 (`MessageWindowChatMemory`) 和 Token 裁剪 (`TokenWindowChatMemory`) 策略，InMemory 和 MySQL 持久化实现，Agent 集成支持多轮对话
 - [ ] **结构化输出解析 (Output Parser)** — 目前只有 `OutputFormat.JSON_OBJECT`，缺少将 JSON 反序列化为 Java POJO 的 `OutputParser<T>` 抽象
