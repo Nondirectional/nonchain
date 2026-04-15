@@ -395,6 +395,23 @@ public class MyCustomLLM implements LLM {
 }
 ```
 
+### 集成 Reranker
+
+实现 `Reranker` 接口可以对检索结果进行语义重排序，提升 RAG 召回质量：
+
+```java
+// 使用 OpenAI 兼容 reranker（vLLM、Jina、Cohere）
+Reranker reranker = new OpenAICompatibleReranker("http://10.100.10.21:40000/v1", "bge-reranker-large");
+
+// 注入到 ElasticsearchKnowledgeStore
+ElasticsearchKnowledgeStore store = ElasticsearchKnowledgeStore.builder(client, 1024)
+    .reranker(reranker)
+    .build();
+
+// 检索时自动 rerank：检索 → rerank → 截断到 size
+RetrievalResponse response = store.search(request);
+```
+
 ### 添加新的文档解析器
 
 实现 `DocumentReader` 接口并注册到 `DocumentReaders`：

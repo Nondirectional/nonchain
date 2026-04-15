@@ -4,6 +4,22 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.2] - 2026-04-15
+
+### 新增
+
+- Reranker 检索重排序能力
+  - `Reranker` 函数式接口：对检索结果进行语义重排序
+  - `OpenAICompatibleReranker`：基于 vLLM /v1/rerank 端点实现，支持 bge-reranker-large 等模型，API Key 可选
+  - `ElasticsearchKnowledgeStore.Builder.reranker(Reranker)`：可选注入，配置后检索自动重排序（检索 → rerank → 截断到 size）
+  - `OpenAICompatibleRerankerTest`：16 个单元测试覆盖构造校验、输入校验、JSON 构建、响应解析
+- `LocalModelSmokeTestExample` 示例：验证本地部署的 LLM / Embedding / Reranker 三个服务可用
+
+### 修复
+
+- `AbstractOpenAILLM.buildSimpleParams()` 消息顺序错误：system message 未放在 user message 之前，导致 vLLM 返回 400 错误
+- `OpenAICompatibleReranker.sendRequest()` 空响应体处理：`getErrorStream()` 返回 null 时抛出 NPE，改为抛出清晰的错误消息
+
 ## [0.7.1] - 2026-04-15
 
 ### 新增
