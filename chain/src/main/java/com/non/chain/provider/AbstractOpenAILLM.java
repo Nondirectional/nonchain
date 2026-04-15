@@ -145,13 +145,13 @@ public abstract class AbstractOpenAILLM implements LLM {
 
     private ChatCompletionCreateParams.Builder buildSimpleParams(String systemMessage, String userMessage) {
         ChatCompletionCreateParams.Builder builder = ChatCompletionCreateParams.builder()
-                .model(model)
-                .addUserMessage(userMessage);
-        if (maxCompletionTokens != null) {
-            builder.maxCompletionTokens(maxCompletionTokens);
-        }
+                .model(model);
         if (systemMessage != null && !systemMessage.isBlank()) {
             builder.addSystemMessage(systemMessage);
+        }
+        builder.addUserMessage(userMessage);
+        if (maxCompletionTokens != null) {
+            builder.maxCompletionTokens(maxCompletionTokens);
         }
         return builder;
     }

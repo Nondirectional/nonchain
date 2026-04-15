@@ -23,6 +23,7 @@ import com.non.chain.knowledge.ContextExpansionRequest;
 import com.non.chain.knowledge.ContextExpansionResponse;
 import com.non.chain.knowledge.DocumentChunk;
 import com.non.chain.knowledge.KnowledgeStore;
+import com.non.chain.knowledge.Reranker;
 import com.non.chain.knowledge.RetrievalMode;
 import com.non.chain.knowledge.RetrievalResponse;
 import com.non.chain.knowledge.SearchRequest;
@@ -54,6 +55,7 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
     private final int dims;
     private final ElasticsearchSearchSupport support;
     private final ChainCallback callback;
+    private final Reranker reranker;
 
     private ElasticsearchKnowledgeStore(Builder builder) {
         this.client = builder.client;
@@ -61,6 +63,7 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         this.dims = builder.dims;
         this.support = new ElasticsearchSearchSupport(builder.client, ElasticsearchSearchSupport.DEFAULT_ANALYZER);
         this.callback = builder.callback != null ? builder.callback : ChainCallbackUtil.noop();
+        this.reranker = builder.reranker;
         ensureIndexExists();
     }
 
@@ -121,6 +124,12 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
                     response = searchKnn(request);
                     break;
             }
+
+            // Apply reranker if configured
+            if (reranker != null && request.queryText() != null && !request.queryText().isBlank()) {
+                response = applyReranker(response, request);
+            }
+
             long latencyMs = System.currentTimeMillis() - start;
             int hitCount = response.results().size();
             callback.onRetrievalComplete(new RetrievalCompleteEvent(traceId, response, hitCount, latencyMs));
@@ -227,6 +236,21 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
     public HybridRetriever createHybridRetriever() {
         return HybridRetriever.builder(client)
                 .indexName(indexName)
+                .build();
+    }
+
+    private RetrievalResponse applyReranker(RetrievalResponse response, SearchRequest request) {
+        if (response.results().isEmpty()) {
+            return response;
+        }
+        List<SearchResult> reranked = reranker.rerank(
+                request.queryText(),
+                response.results(),
+                request.size()
+        );
+        return RetrievalResponse.builder()
+                .results(reranked)
+                .debugInfo(response.debugInfo())
                 .build();
     }
 
@@ -424,6 +448,7 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         private final int dims;
         private String indexName = "knowledge_chunks";
         private ChainCallback callback;
+        private Reranker reranker;
 
         private Builder(ElasticsearchClient client, int dims) {
             this.client = client;
@@ -444,6 +469,11 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
             if (chainContext != null && this.callback == null) {
                 this.callback = chainContext.callback();
             }
+            return this;
+        }
+
+        public Builder reranker(Reranker reranker) {
+            this.reranker = reranker;
             return this;
         }
 
