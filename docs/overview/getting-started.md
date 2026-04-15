@@ -45,7 +45,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.4.0</version>
+    <version>0.7.0</version>
 </dependency>
 ```
 
@@ -57,7 +57,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.4.0</version>
+    <version>0.7.0</version>
 </dependency>
 ```
 
@@ -69,7 +69,19 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.4.0</version>
+    <version>0.7.0</version>
+</dependency>
+```
+
+### MySQL 持久化模块（可选）
+
+如需使用 MySQL 持久化对话记忆：
+
+```xml
+<dependency>
+    <groupId>com.non</groupId>
+    <artifactId>chain-mysql</artifactId>
+    <version>0.7.0</version>
 </dependency>
 ```
 

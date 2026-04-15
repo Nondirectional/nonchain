@@ -9,8 +9,8 @@
     <version>0.7.0</version>
   </parent>
 
-  <artifactId>chain-elasticsearch</artifactId>
-  <name>chain-elasticsearch</name>
+  <artifactId>chain-mysql</artifactId>
+  <name>chain-mysql</name>
   <packaging>jar</packaging>
 
   <dependencies>
@@ -18,11 +18,6 @@
       <groupId>com.non</groupId>
       <artifactId>chain</artifactId>
       <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>co.elastic.clients</groupId>
-      <artifactId>elasticsearch-java</artifactId>
-      <version>8.13.4</version>
     </dependency>
     <dependency>
       <groupId>com.fasterxml.jackson.core</groupId>
@@ -33,6 +28,12 @@
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
       <version>4.13.2</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <version>2.2.224</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

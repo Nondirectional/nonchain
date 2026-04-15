@@ -77,4 +77,12 @@ public class Message {
     public static Message toolResult(String toolCallId, String content) {
         return new Message("tool", content, null, toolCallId, null);
     }
+
+    /**
+     * 从完整参数构造消息，用于反序列化等场景
+     */
+    public static Message of(String role, String content, List<ContentPart> contentParts,
+                             String toolCallId, List<ToolCall> toolCalls) {
+        return new Message(role, content, contentParts, toolCallId, toolCalls);
+    }
 }

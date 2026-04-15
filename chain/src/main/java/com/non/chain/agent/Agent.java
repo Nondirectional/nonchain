@@ -12,6 +12,7 @@ import com.non.chain.callback.event.LlmStartEvent;
 import com.non.chain.callback.event.ToolCompleteEvent;
 import com.non.chain.callback.event.ToolErrorEvent;
 import com.non.chain.callback.event.ToolStartEvent;
+import com.non.chain.memory.ChatMemory;
 import com.non.chain.provider.LLM;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
@@ -46,6 +47,7 @@ public class Agent {
     private final String systemPrompt;
     private final int maxIterations;
     private final ChainCallback callback;
+    private final ChatMemory memory;
 
     private Agent(Builder builder) {
         this.llm = builder.llm;
@@ -53,6 +55,7 @@ public class Agent {
         this.systemPrompt = builder.systemPrompt;
         this.maxIterations = builder.maxIterations;
         this.callback = builder.callback;
+        this.memory = builder.memory;
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -61,8 +64,32 @@ public class Agent {
 
     /**
      * 简单查询入口
+     *
+     * <p>如果配置了 Memory，自动管理多轮对话历史：</p>
+     * <ol>
+     *   <li>将用户消息加入 Memory</li>
+     *   <li>从 Memory 获取历史消息</li>
+     *   <li>拼装 systemPrompt + 历史消息，调用 LLM</li>
+     *   <li>将新产生的消息（assistant + tool）同步回 Memory</li>
+     * </ol>
      */
     public ChatResult run(String query) {
+        if (memory != null) {
+            memory.add(Message.user(query));
+            List<Message> messages = new ArrayList<>();
+            if (systemPrompt != null && !systemPrompt.isBlank()) {
+                messages.add(Message.system(systemPrompt));
+            }
+            List<Message> history = memory.messages();
+            int historyEnd = messages.size() + history.size();
+            messages.addAll(history);
+            ChatResult result = runWithLoop(messages);
+            // 同步新消息（assistant + tool results）到 memory
+            for (int i = historyEnd; i < messages.size(); i++) {
+                memory.add(messages.get(i));
+            }
+            return result;
+        }
         List<Message> messages = new ArrayList<>();
         if (systemPrompt != null && !systemPrompt.isBlank()) {
             messages.add(Message.system(systemPrompt));
@@ -145,6 +172,7 @@ public class Agent {
         private String systemPrompt;
         private int maxIterations = DEFAULT_MAX_ITERATIONS;
         private ChainCallback callback;
+        private ChatMemory memory;
 
         private Builder(LLM llm, ToolRegistry toolRegistry) {
             this.llm = llm;
@@ -185,6 +213,31 @@ public class Agent {
             if (chainContext != null && this.callback == null) {
                 this.callback = chainContext.callback();
             }
+            return this;
+        }
+
+        /**
+         * 设置对话记忆，用于自动管理多轮对话历史。
+         *
+         * <p>配置后，{@code run(String)} 会自动将消息存入 Memory，
+         * 并在下次调用时携带历史上下文。{@code run(List<Message>)} 不受影响。</p>
+         *
+         * <pre>{@code
+         * ChatMemory memory = MessageWindowChatMemory.builder()
+         *     .maxMessages(20)
+         *     .conversationId("user-1")
+         *     .build();
+         *
+         * Agent agent = Agent.builder(llm, toolRegistry)
+         *     .memory(memory)
+         *     .build();
+         *
+         * agent.run("我叫小明");
+         * agent.run("我叫什么名字？"); // 能记住 "小明"
+         * }</pre>
+         */
+        public Builder memory(ChatMemory memory) {
+            this.memory = memory;
             return this;
         }
 

@@ -4,6 +4,32 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.0] - 2026-04-15
+
+### 新增
+
+- 对话记忆 (Memory) 模块 (`com.non.chain.memory`)：支持多轮对话上下文保持
+  - `ChatMemory` 策略接口：管理对话历史的裁剪逻辑 (add/addAll/messages/clear)
+  - `ChatMemoryStore` 存储接口：抽象消息的读写和删除，与裁剪策略分离
+  - `MessageWindowChatMemory`：滑动窗口策略，保留最近 N 条消息，保护 SystemMessage 和工具消息配对
+  - `TokenWindowChatMemory`：基于 Token 数量的裁剪策略，按 token 数限制上下文大小
+  - `Tokenizer` 接口 + `JtokkitTokenizer` 实现：基于 jtokkit 的 token 计数能力
+  - `InMemoryChatMemoryStore`：内存存储实现
+- `chain-mysql` 子模块：MySQL 持久化存储
+  - `MysqlChatMemoryStore`：基于 JDBC + DataSource 的对话消息持久化，事务保证
+  - `MessageSerializer`：Message 与 JSON 之间的序列化/反序列化工具
+  - `chat_memory_message.sql` 建表脚本
+- `Agent.builder().memory(ChatMemory)` 集成：配置后 `run(String)` 自动管理多轮对话历史
+  - systemPrompt 由 Agent 管理，不存入 Memory
+  - 工具调用消息 (assistant + tool result) 自动同步到 Memory
+- `Message.of()` 工厂方法：支持从完整参数构造 Message（反序列化场景）
+- jtokkit 依赖提升到 chain 核心模块
+
+### 变更
+
+- `Agent` 新增 `memory` 字段和 Builder 方法，`run(String)` 支持 Memory 集成
+- `Message` 新增 `of()` 静态工厂方法
+
 ## [0.6.1] - 2026-04-14
 
 ### 修复
