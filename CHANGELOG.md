@@ -4,6 +4,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.4] - 2026-04-16
+
+### 变更
+
+- LLM Provider 构造方法简化：`maxCompletionTokens` 和 `callback` 从构造方法参数移除，改为 fluent setter 配置
+  - `AbstractOpenAILLM` 构造方法精简为 `(baseUrl, apiKey, model)`，新增 `maxCompletionTokens()` 和 `callback()` fluent setter
+  - `DashscopeLLM` 构造方法简化为 `(String model)` 和 `(String apiKey, String model)`
+  - `OpenAICompatibleLLM` 构造方法简化为 `(String baseUrl, String model)` 和 `(String baseUrl, String apiKey, String model)`
+  - `VLLM` 构造方法同步简化
+  - `fromContext()` 静态工厂方法保留 `maxCompletionTokens` 和 `callback` 参数，内部通过 fluent setter 设置
+
 ## [0.7.3] - 2026-04-16
 
 ### 新增
