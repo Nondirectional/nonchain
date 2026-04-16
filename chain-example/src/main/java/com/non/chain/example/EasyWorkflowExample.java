@@ -15,10 +15,9 @@ import com.non.chain.tool.*;
 public class EasyWorkflowExample {
 
     public static void main(String[] args) {
-        LLM llm = new DashscopeLLM(
-                "qwen3.5-35b-a3b",
-                512
-        ).enableThinking(true).thinkingBudget(512);
+        LLM llm = new DashscopeLLM("qwen3.5-35b-a3b")
+                .maxCompletionTokens(512)
+                .enableThinking(true).thinkingBudget(512);
 
         Graph graph = Graph.builder("conditional-pipeline")
                 .start("classify")

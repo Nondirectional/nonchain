@@ -30,32 +30,18 @@ public class OpenAICompatibleLLM extends AbstractOpenAILLM {
      * @param model    模型名称，如 "qwen3-14b"
      */
     public OpenAICompatibleLLM(String baseUrl, String model) {
-        this(baseUrl, null, model, null, null);
+        super(baseUrl, resolveApiKey(null), model);
     }
 
     /**
-     * 指定 base URL 和 maxCompletionTokens
+     * 指定 API Key 构造
      *
-     * @param baseUrl             服务端点地址
-     * @param model               模型名称
-     * @param maxCompletionTokens 最大生成 token 数
+     * @param baseUrl  服务端点地址
+     * @param apiKey   API Key（可选，无认证时传 null）
+     * @param model    模型名称
      */
-    public OpenAICompatibleLLM(String baseUrl, String model, Integer maxCompletionTokens) {
-        this(baseUrl, null, model, maxCompletionTokens, null);
-    }
-
-    /**
-     * 完整参数构造
-     *
-     * @param baseUrl             服务端点地址
-     * @param apiKey              API Key（可选，无认证时传 null）
-     * @param model               模型名称
-     * @param maxCompletionTokens 最大生成 token 数
-     * @param callback            回调（可选）
-     */
-    public OpenAICompatibleLLM(String baseUrl, String apiKey, String model,
-                               Integer maxCompletionTokens, ChainCallback callback) {
-        super(baseUrl, resolveApiKey(apiKey), model, maxCompletionTokens, callback);
+    public OpenAICompatibleLLM(String baseUrl, String apiKey, String model) {
+        super(baseUrl, resolveApiKey(apiKey), model);
     }
 
     /**
@@ -63,8 +49,14 @@ public class OpenAICompatibleLLM extends AbstractOpenAILLM {
      */
     public static OpenAICompatibleLLM fromContext(String baseUrl, String apiKey, String model,
                                                   Integer maxCompletionTokens, ChainContext chainContext) {
-        return new OpenAICompatibleLLM(baseUrl, apiKey, model, maxCompletionTokens,
-                chainContext != null ? chainContext.callback() : null);
+        OpenAICompatibleLLM llm = new OpenAICompatibleLLM(baseUrl, apiKey, model);
+        if (maxCompletionTokens != null) {
+            llm.maxCompletionTokens(maxCompletionTokens);
+        }
+        if (chainContext != null && chainContext.callback() != null) {
+            llm.callback(chainContext.callback());
+        }
+        return llm;
     }
 
     private static String resolveApiKey(String apiKey) {

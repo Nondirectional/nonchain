@@ -35,10 +35,8 @@ public class FunctionCallMultiParamExample {
     // ===== 主流程 =====
 
     public static void main(String[] args) {
-        LLM llm = new DashscopeLLM(
-                "qwen-plus",
-                512
-        );
+        LLM llm = new DashscopeLLM("qwen-plus")
+                .maxCompletionTokens(512);
 
         System.out.println("============ 注解方式 ============\n");
         demoAnnotation(llm);

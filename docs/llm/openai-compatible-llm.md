@@ -23,8 +23,7 @@
 | 构造器 | 说明 |
 |--------|------|
 | `OpenAICompatibleLLM(String baseUrl, String model)` | 无 API Key，适用于内网无认证部署 |
-| `OpenAICompatibleLLM(String baseUrl, String model, Integer maxCompletionTokens)` | 指定最大 token 数 |
-| `OpenAICompatibleLLM(String baseUrl, String apiKey, String model, Integer maxCompletionTokens, ChainCallback callback)` | 完整参数 |
+| `OpenAICompatibleLLM(String baseUrl, String apiKey, String model)` | 指定 API Key |
 
 API Key 为可选参数。对于内网无认证的部署环境，可以不传 API Key，框架会使用占位符。
 
@@ -39,6 +38,8 @@ API Key 为可选参数。对于内网无认证的部署环境，可以不传 AP
 | `enableJsonObjectMode(boolean enable)` | `OpenAICompatibleLLM` | 启用或关闭 JSON Object 结构化输出模式 |
 | `temperature(Double temperature)` | `OpenAICompatibleLLM` | 采样温度，控制生成文本多样性，范围 [0, 2) |
 | `topP(Double topP)` | `OpenAICompatibleLLM` | 核采样概率阈值，范围 (0, 1.0] |
+| `maxCompletionTokens(Integer)` | `OpenAICompatibleLLM` | 最大生成 token 数 |
+| `callback(ChainCallback)` | `OpenAICompatibleLLM` | 设置回调 |
 
 ## 使用示例
 
@@ -82,10 +83,8 @@ LLM llm = new OpenAICompatibleLLM("http://localhost:11434/v1", "qwen3:14b");
 LLM llm = new OpenAICompatibleLLM(
     "https://api.example.com/v1",
     "sk-your-api-key",
-    "model-name",
-    2048,
-    null
-);
+    "model-name"
+).maxCompletionTokens(2048);
 ```
 
 ### 配合 Agent 使用

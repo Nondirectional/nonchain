@@ -95,7 +95,8 @@ public class AgentLoopExample {
     }
 
     public static void main(String[] args) {
-        LLM llm = new DashscopeLLM("qwen-plus", 1024);
+        LLM llm = new DashscopeLLM("qwen-plus")
+                .maxCompletionTokens(1024);
 
         // 使用注解方式注册工具
         ToolRegistry registry = new ToolRegistry().scan(new TravelTools());

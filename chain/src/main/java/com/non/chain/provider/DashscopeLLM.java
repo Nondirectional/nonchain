@@ -19,26 +19,25 @@ public class DashscopeLLM extends AbstractOpenAILLM {
     private Integer topK;
 
     public DashscopeLLM(String model) {
-        this(null, model, null, null);
+        super(DEFAULT_BASE_URL, resolveApiKey(null), model);
     }
 
-    public DashscopeLLM(String model, Integer maxCompletionTokens) {
-        this(null, model, maxCompletionTokens, null);
-    }
-
-    public DashscopeLLM(String apiKey, String model, Integer maxCompletionTokens) {
-        this(apiKey, model, maxCompletionTokens, null);
-    }
-
-    public DashscopeLLM(String apiKey, String model, Integer maxCompletionTokens, ChainCallback callback) {
-        super(DEFAULT_BASE_URL, resolveApiKey(apiKey), model, maxCompletionTokens, callback);
+    public DashscopeLLM(String apiKey, String model) {
+        super(DEFAULT_BASE_URL, resolveApiKey(apiKey), model);
     }
 
     /**
      * 通过 ChainContext 构造
      */
     public static DashscopeLLM fromContext(String apiKey, String model, Integer maxCompletionTokens, ChainContext chainContext) {
-        return new DashscopeLLM(apiKey, model, maxCompletionTokens, chainContext != null ? chainContext.callback() : null);
+        DashscopeLLM llm = new DashscopeLLM(apiKey, model);
+        if (maxCompletionTokens != null) {
+            llm.maxCompletionTokens(maxCompletionTokens);
+        }
+        if (chainContext != null && chainContext.callback() != null) {
+            llm.callback(chainContext.callback());
+        }
+        return llm;
     }
 
     private static String resolveApiKey(String explicitApiKey) {

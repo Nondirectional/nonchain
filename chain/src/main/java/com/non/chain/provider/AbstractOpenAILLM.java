@@ -36,8 +36,8 @@ public abstract class AbstractOpenAILLM implements LLM {
 
     protected final OpenAIClient client;
     protected final String model;
-    protected final Integer maxCompletionTokens;
-    protected final ChainCallback callback;
+    protected Integer maxCompletionTokens;
+    protected ChainCallback callback;
 
     private boolean enableThinking;
     private Integer thinkingBudget;
@@ -45,15 +45,13 @@ public abstract class AbstractOpenAILLM implements LLM {
     private Double topP;
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
 
-    protected AbstractOpenAILLM(String baseUrl, String apiKey, String model,
-                                Integer maxCompletionTokens, ChainCallback callback) {
+    protected AbstractOpenAILLM(String baseUrl, String apiKey, String model) {
         this.client = OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
                 .build();
         this.model = model;
-        this.maxCompletionTokens = maxCompletionTokens;
-        this.callback = callback != null ? callback : ChainCallbackUtil.noop();
+        this.callback = ChainCallbackUtil.noop();
     }
 
     // ---- Fluent setters ----
@@ -80,6 +78,16 @@ public abstract class AbstractOpenAILLM implements LLM {
 
     public AbstractOpenAILLM topP(Double topP) {
         this.topP = topP;
+        return this;
+    }
+
+    public AbstractOpenAILLM maxCompletionTokens(Integer maxCompletionTokens) {
+        this.maxCompletionTokens = maxCompletionTokens;
+        return this;
+    }
+
+    public AbstractOpenAILLM callback(ChainCallback callback) {
+        this.callback = callback != null ? callback : ChainCallbackUtil.noop();
         return this;
     }
 

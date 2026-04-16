@@ -29,10 +29,8 @@ public class FunctionCallExample {
     }
 
     public static void main(String[] args) {
-        LLM llm = new DashscopeLLM(
-                "qwen-plus",
-                512
-        );
+        LLM llm = new DashscopeLLM("qwen-plus")
+                .maxCompletionTokens(512);
 
         // 扫描注解，注册工具
         ToolRegistry registry = new ToolRegistry().scan(new WeatherService());
