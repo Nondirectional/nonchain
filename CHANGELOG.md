@@ -4,6 +4,26 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.3] - 2026-04-16
+
+### 新增
+
+- vLLM LLM provider：专门为 vLLM 推理服务器设计的 LLM 实现
+  - `VLLM` 类：继承 `OpenAICompatibleLLM`，处理 vLLM 特有的 thinking 参数格式
+  - thinking 开关通过 `chat_template_kwargs: {enable_thinking: true}` 嵌套 JSON 传递
+  - 思考预算通过 `thinking_token_budget` 字段传递
+  - `fromContext()` 静态工厂方法，支持 `ChainContext` 注入
+  - `VLLMExample` 示例：基础对话、thinking 开关、思考预算控制、流式 + thinking
+- 新增 `docs/llm/vllm.md` 文档：vLLM provider 使用指南
+
+### 变更
+
+- `AbstractOpenAILLM` 重构：将 `applyAdditionalParams()` 拆分为 `applyThinkingParams()` + `applyCommonParams()`，thinking 参数注入可被子类覆写
+- `AbstractOpenAILLM` 新增 `getThinkingFieldName()` hook：子类可覆写思考内容响应字段名（默认 `reasoning_content`，vLLM 使用 `reasoning`）
+- `AbstractOpenAILLM` 新增 `isEnableThinking()` / `getThinkingBudget()` protected 访问器
+- `AbstractOpenAILLM` 的 `extractThinking()` / `extractDeltaThinking()` 改为 `protected`，使用 `getThinkingFieldName()` 获取字段名
+- `OpenAICompatibleLLM` 继承体系图更新，包含 VLLM
+
 ## [0.7.2] - 2026-04-15
 
 ### 新增
