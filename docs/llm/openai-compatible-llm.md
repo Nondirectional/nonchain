@@ -115,6 +115,7 @@ String response = agent.run("帮我搜索一下 Java 的新特性");
 LLM (接口)
  └── AbstractOpenAILLM (抽象基类，封装 OpenAI API 通用逻辑)
       ├── OpenAICompatibleLLM    ← 通用，base URL 完全可配置
+      │    └── VLLM              ← vLLM 专用，thinking 参数嵌套格式
       └── DashscopeLLM           ← DashScope 默认值 + topK 特有参数
 ```
 
@@ -122,6 +123,7 @@ LLM (接口)
 
 ## 相关文档
 
+- [VLLM](./vllm.md) - vLLM 推理服务器专用 provider（thinking 嵌套参数格式）
 - [DashscopeLLM](./dashscope-llm.md) - 阿里云 DashScope provider
 - [Message 消息模型](./message.md) - 消息类型与 ChatResult
 - [多模态输入](./multimodal.md) - 图片理解功能

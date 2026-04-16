@@ -4,7 +4,7 @@
 
 ## 特性
 
-- **LLM Provider 抽象** — 统一的 LLM 调用接口，支持阿里云 DashScope 及任何 OpenAI 兼容端点（vllm-openai、Ollama、LiteLLM）
+- **LLM Provider 抽象** — 统一的 LLM 调用接口，支持阿里云 DashScope、vLLM 及任何 OpenAI 兼容端点（Ollama、LiteLLM）
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
 - **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调
@@ -40,7 +40,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.7.1</version>
+    <version>0.7.3</version>
 </dependency>
 ```
 
@@ -50,7 +50,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.7.1</version>
+    <version>0.7.3</version>
 </dependency>
 ```
 
@@ -60,7 +60,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.7.1</version>
+    <version>0.7.3</version>
 </dependency>
 ```
 
@@ -293,7 +293,7 @@ for (SearchResult result : response.results()) {
 
 ```
                       ┌─────────┐
-                      │   LLM   │  (DashscopeLLM)
+                      │   LLM   │  (DashscopeLLM / VLLM / OpenAICompatibleLLM)
                       └────┬────┘
                            │
               ┌────────────┼────────────┐
@@ -336,6 +336,7 @@ for (SearchResult result : response.results()) {
 | `ImageInputExample` | 多模态图片输入 |
 | `StreamingChatExample` | 流式输出：基础流式、思考模式、工具调用 |
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
+| `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |

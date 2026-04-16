@@ -83,6 +83,16 @@ public abstract class AbstractOpenAILLM implements LLM {
         return this;
     }
 
+    // ---- Protected accessors for subclasses ----
+
+    protected boolean isEnableThinking() {
+        return enableThinking;
+    }
+
+    protected Integer getThinkingBudget() {
+        return thinkingBudget;
+    }
+
     // ---- 同步调用 ----
 
     @Override
@@ -259,12 +269,28 @@ public abstract class AbstractOpenAILLM implements LLM {
      * 子类可覆写此方法添加额外参数（如 DashScope 的 topK）。
      */
     protected void applyAdditionalParams(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
+        applyThinkingParams(builder);
+        applyCommonParams(builder, outputFormat);
+    }
+
+    /**
+     * 注入 thinking 相关参数。
+     * 子类可覆写此方法以支持不同提供商的 thinking 参数格式。
+     * 默认实现将 enable_thinking 和 thinking_budget 作为平级属性发送。
+     */
+    protected void applyThinkingParams(ChatCompletionCreateParams.Builder builder) {
         if (enableThinking) {
             builder.putAdditionalBodyProperty("enable_thinking", JsonValue.from(true));
             if (thinkingBudget != null) {
                 builder.putAdditionalBodyProperty("thinking_budget", JsonValue.from(thinkingBudget));
             }
         }
+    }
+
+    /**
+     * 应用通用参数（temperature, topP, outputFormat）。
+     */
+    private void applyCommonParams(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {
         if (temperature != null) {
             builder.temperature(temperature);
         }
@@ -399,8 +425,16 @@ public abstract class AbstractOpenAILLM implements LLM {
         return new ChatResult(contentBuilder.toString(), thinkingBuilder.toString(), toolCalls, tokenUsage);
     }
 
-    private String extractThinking(ChatCompletionMessage message) {
-        JsonValue thinkingValue = message._additionalProperties().get("reasoning_content");
+    /**
+     * 返回响应中思考内容的字段名，子类可覆写。
+     * 默认为 "reasoning_content"（DashScope 风格），vLLM 使用 "reasoning"。
+     */
+    protected String getThinkingFieldName() {
+        return "reasoning_content";
+    }
+
+    protected String extractThinking(ChatCompletionMessage message) {
+        JsonValue thinkingValue = message._additionalProperties().get(getThinkingFieldName());
         return thinkingValue != null
                 ? thinkingValue.accept(new JsonValue.Visitor<String>() {
                     @Override
@@ -421,8 +455,8 @@ public abstract class AbstractOpenAILLM implements LLM {
                 : null;
     }
 
-    private String extractDeltaThinking(ChatCompletionChunk.Choice.Delta delta) {
-        JsonValue thinkingValue = delta._additionalProperties().get("reasoning_content");
+    protected String extractDeltaThinking(ChatCompletionChunk.Choice.Delta delta) {
+        JsonValue thinkingValue = delta._additionalProperties().get(getThinkingFieldName());
         return thinkingValue != null
                 ? thinkingValue.accept(new JsonValue.Visitor<String>() {
                     @Override
