@@ -40,7 +40,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.5</version>
 </dependency>
 ```
 
@@ -50,7 +50,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.5</version>
 </dependency>
 ```
 
@@ -60,7 +60,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.7.3</version>
+    <version>0.7.5</version>
 </dependency>
 ```
 
@@ -337,6 +337,7 @@ for (SearchResult result : response.results()) {
 | `StreamingChatExample` | 流式输出：基础流式、思考模式、工具调用 |
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
+| `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
 | `GraphKnowledgeExample` | RAG 管道工作流 |
 | `EmbeddingModelExample` | Embedding 模型使用 |

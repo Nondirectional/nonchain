@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.5] - 2026-04-22
+
+### 新增
+
+- 多模态 base64 图片支持：新增 `ImageDataPart` 内容部件
+  - `ImageDataPart.of(String base64Data, String mimeType)`：直接传入 base64 编码的图片数据
+  - `ImageDataPart.fromFile(String filePath)`：从本地文件读取图片，自动检测 MIME 类型并转为 base64
+  - 支持 png、jpeg、gif、webp 等常见图片格式
+- `AbstractOpenAILLM.toSdkContentPart()` 增加 `ImageDataPart` 分支，通过 data URI 格式发送 base64 图片
+- `MessageSerializer` 支持新增 `ImageDataPart` 的序列化与反序列化
+- `VLLMMultimodalExample` 示例：演示 VLLM 提供者的三种图片输入方式（URL、本地文件、base64）
+- 更新 `docs/llm/multimodal.md` 文档：补充 `ImageDataPart` 说明和 VLLM 多模态用法
+- 更新 `docs/llm/vllm.md` 文档：新增多模态支持章节
+
 ## [0.7.4] - 2026-04-16
 
 ### 变更
