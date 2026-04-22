@@ -128,6 +128,39 @@ Agent agent = Agent.builder(llm, registry)
 String response = agent.run("帮我搜索一下 Java 的新特性");
 ```
 
+### 多模态图片理解
+
+vLLM 支持部署视觉理解模型（如 Qwen2-VL），可以结合 `ImageDataPart` 传入本地图片文件或 base64 数据：
+
+```java
+import com.non.chain.*;
+import com.non.chain.provider.LLM;
+import com.non.chain.provider.VLLM;
+import java.util.Arrays;
+
+LLM llm = new VLLM("http://localhost:8000/v1", "Qwen/Qwen2-VL-7B-Instruct");
+
+// 从本地文件读取图片（自动检测 MIME 类型）
+Message userMessage = Message.user(Arrays.asList(
+    ImageDataPart.fromFile("/path/to/image.jpg"),
+    TextPart.of("描述这张图片的内容")
+));
+
+ChatResult result = llm.chat(Arrays.asList(userMessage));
+System.out.println(result.content());
+```
+
+也可以直接传入 base64 编码的图片数据：
+
+```java
+Message userMessage = Message.user(Arrays.asList(
+    ImageDataPart.of(base64String, "image/png"),
+    TextPart.of("这张图片里有什么？")
+));
+```
+
+vLLM 多模态同时支持 `ImageUrlPart`（URL 图片）和 `ImageDataPart`（base64/本地文件）两种方式。
+
 ## Provider 继承体系
 
 ```

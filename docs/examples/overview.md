@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 22 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 23 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -51,6 +51,7 @@ mvn compile exec:java -pl chain-example \
 | `FunctionCallMultiParamExample` | 多参数工具：注解 vs 流式对比 |
 | `StructuredOutputExample` | JSON Object 结构化输出 |
 | `ImageInputExample` | 多模态图片输入 |
+| `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
 
 #### FunctionCallExample
 
@@ -96,6 +97,18 @@ mvn compile exec:java -pl chain-example \
 mvn compile exec:java -pl chain-example \
     -Dexec.mainClass="com.non.chain.example.ImageInputExample"
 ```
+
+#### VLLMMultimodalExample
+
+演示 vLLM 多模态图片输入，支持三种方式：URL 图片、本地文件（自动转 base64）、base64 数据。适用于 vLLM 本地部署的视觉模型（如 Qwen2-VL）。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.VLLMMultimodalExample"
+```
+
+前置条件：
+- vLLM 服务运行中，且部署了视觉模型
 
 ### 工作流
 
@@ -367,7 +380,7 @@ mvn compile exec:java -pl chain-example \
 
 ## 推荐学习路径
 
-1. **LLM 基础**：`FunctionCallExample` -> `StructuredOutputExample` -> `ImageInputExample`
+1. **LLM 基础**：`FunctionCallExample` -> `StructuredOutputExample` -> `ImageInputExample` -> `VLLMMultimodalExample`
 2. **文档处理**：`TxtDocumentReaderExample` -> `MarkdownDocumentReaderExample` -> `PdfDocumentReaderExample` -> `DocumentCleanerExample`
 3. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample` -> `LlmDocumentSplitterExample`
 4. **统一检索**：`EmbeddingModelExample` -> `ElasticsearchHybridExample` -> `GraphKnowledgeExample`

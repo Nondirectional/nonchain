@@ -250,6 +250,17 @@ public abstract class AbstractOpenAILLM implements LLM {
                             .type(JsonValue.from("image_url"))
                             .build()
             );
+        } else if (part instanceof ImageDataPart) {
+            ImageDataPart imgData = (ImageDataPart) part;
+            String dataUri = "data:" + imgData.mimeType() + ";base64," + imgData.base64Data();
+            return ChatCompletionContentPart.ofImageUrl(
+                    ChatCompletionContentPartImage.builder()
+                            .imageUrl(ChatCompletionContentPartImage.ImageUrl.builder()
+                                    .url(dataUri)
+                                    .build())
+                            .type(JsonValue.from("image_url"))
+                            .build()
+            );
         }
         throw new IllegalArgumentException("不支持的内容类型: " + part.getClass().getSimpleName());
     }

@@ -137,6 +137,7 @@ Framework 层是 nonchain 的核心，提供了三大基础能力：工具管理
 - `ContentPart` — 多模态内容部件的标记接口
 - `TextPart` — 文本内容部件
 - `ImageUrlPart` — 图片 URL 内容部件
+- `ImageDataPart` — Base64 图片数据内容部件
 - `ChatResult` — LLM 响应结果，包含回复内容、思考内容和工具调用列表
 
 ### Processing 层（数据处理）
@@ -236,7 +237,7 @@ nonchain 的核心能力均通过 Java 接口定义，实现与使用解耦：
 | `KnowledgeStore` | 知识存储 | `ElasticsearchKnowledgeStore` |
 | `KeywordRetriever` | 关键词检索 | `ElasticsearchBM25Retriever` |
 | `ContentMeasure` | 内容度量 | `CharacterMeasure`, `TokenMeasure` |
-| `ContentPart` | 多模态内容部件 | `TextPart`, `ImageUrlPart` |
+| `ContentPart` | 多模态内容部件 | `TextPart`, `ImageUrlPart`, `ImageDataPart` |
 | `ChatMemory` | 对话记忆策略 | `MessageWindowChatMemory`, `TokenWindowChatMemory` |
 | `ChatMemoryStore` | 对话记忆存储 | `InMemoryChatMemoryStore`, `MysqlChatMemoryStore` |
 | `Tokenizer` | Token 计数 | `JtokkitTokenizer` |

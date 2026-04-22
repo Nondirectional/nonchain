@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.non.chain.ContentPart;
+import com.non.chain.ImageDataPart;
 import com.non.chain.ImageUrlPart;
 import com.non.chain.Message;
 import com.non.chain.TextPart;
@@ -58,6 +59,10 @@ public class MessageSerializer {
                     } else if (part instanceof ImageUrlPart) {
                         partNode.put("type", "imageUrl");
                         partNode.put("imageUrl", ((ImageUrlPart) part).url());
+                    } else if (part instanceof ImageDataPart) {
+                        partNode.put("type", "imageData");
+                        partNode.put("base64Data", ((ImageDataPart) part).base64Data());
+                        partNode.put("mimeType", ((ImageDataPart) part).mimeType());
                     }
                 }
             }
@@ -98,6 +103,11 @@ public class MessageSerializer {
                         contentParts.add(new TextPart(partNode.get("text").asText()));
                     } else if ("imageUrl".equals(type)) {
                         contentParts.add(new ImageUrlPart(partNode.get("imageUrl").asText()));
+                    } else if ("imageData".equals(type)) {
+                        contentParts.add(new ImageDataPart(
+                                partNode.get("base64Data").asText(),
+                                partNode.get("mimeType").asText()
+                        ));
                     }
                 }
             }
