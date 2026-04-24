@@ -4,6 +4,16 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.7] - 2026-04-24
+
+### 新增
+
+- Agent 流式输出：`run()` 方法新增 `Consumer<AgentEvent>` 回调重载，支持实时接收 Agent 循环过程中的增量事件
+  - `AgentEvent` 接口，9 种事件类型：`TextDelta`、`ThinkingDelta`、`ToolCallDelta`、`ToolStart`、`ToolEnd`、`RoundStart`、`RoundEnd`、`AgentError`、`Complete`
+  - `Agent.run(String query, Consumer<AgentEvent>)` 和 `Agent.run(List<Message>, Consumer<AgentEvent>)` 流式入口
+  - 有回调时内部使用 `llm.streamChat()`，无回调时保持原有 `llm.chat()` 行为，完全向后兼容
+- `StreamingAgentExample` 示例：演示 Agent 流式事件消费
+
 ## [0.7.6] - 2026-04-24
 
 ### 新增

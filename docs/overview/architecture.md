@@ -243,6 +243,7 @@ nonchain 的核心能力均通过 Java 接口定义，实现与使用解耦：
 | `ChatMemory` | 对话记忆策略 | `MessageWindowChatMemory`, `TokenWindowChatMemory` |
 | `ChatMemoryStore` | 对话记忆存储 | `InMemoryChatMemoryStore`, `MysqlChatMemoryStore`, `PostgresChatMemoryStore` |
 | `Tokenizer` | Token 计数 | `JtokkitTokenizer` |
+| `AgentEvent` | Agent 流式事件 | `TextDelta`, `ThinkingDelta`, `ToolCallDelta`, `ToolStart`, `ToolEnd`, `RoundStart`, `RoundEnd`, `AgentError`, `Complete` |
 
 这种设计使得统一请求模型可以在不同检索模式下复用。调用方通过 `SearchRequest` 描述查询意图，底层由 Elasticsearch 负责自动选择 BM25、kNN 或 hybrid 路径。
 
