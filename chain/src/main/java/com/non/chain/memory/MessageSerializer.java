@@ -1,4 +1,4 @@
-package com.non.chain.mysql;
+package com.non.chain.memory;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -17,8 +17,6 @@ import java.util.List;
 
 /**
  * Message 与 JSON 之间的序列化/反序列化工具。
- *
- * <p>用于 MySQL 存储中将 Message 序列化为 content_json 字段。</p>
  */
 public class MessageSerializer {
 
@@ -27,9 +25,6 @@ public class MessageSerializer {
     private MessageSerializer() {
     }
 
-    /**
-     * 将 Message 序列化为 JSON 字符串
-     */
     public static String serialize(Message message) {
         try {
             ObjectNode node = MAPPER.createObjectNode();
@@ -72,9 +67,6 @@ public class MessageSerializer {
         }
     }
 
-    /**
-     * 将 JSON 字符串反序列化为 Message
-     */
     public static Message deserialize(String json) {
         try {
             JsonNode node = MAPPER.readTree(json);

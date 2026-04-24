@@ -210,7 +210,9 @@ chain-example
     │   └── chain
     ├── chain-elasticsearch
     │   └── chain
-    └── chain-mysql
+    ├── chain-mysql
+    │   └── chain
+    └── chain-postgres
         └── chain
 ```
 
@@ -239,7 +241,7 @@ nonchain 的核心能力均通过 Java 接口定义，实现与使用解耦：
 | `ContentMeasure` | 内容度量 | `CharacterMeasure`, `TokenMeasure` |
 | `ContentPart` | 多模态内容部件 | `TextPart`, `ImageUrlPart`, `ImageDataPart` |
 | `ChatMemory` | 对话记忆策略 | `MessageWindowChatMemory`, `TokenWindowChatMemory` |
-| `ChatMemoryStore` | 对话记忆存储 | `InMemoryChatMemoryStore`, `MysqlChatMemoryStore` |
+| `ChatMemoryStore` | 对话记忆存储 | `InMemoryChatMemoryStore`, `MysqlChatMemoryStore`, `PostgresChatMemoryStore` |
 | `Tokenizer` | Token 计数 | `JtokkitTokenizer` |
 
 这种设计使得统一请求模型可以在不同检索模式下复用。调用方通过 `SearchRequest` 描述查询意图，底层由 Elasticsearch 负责自动选择 BM25、kNN 或 hybrid 路径。
@@ -302,7 +304,7 @@ nonchain 中的数据模型（`Message`、`ChatResult`、`ParsedDocument`、`Tex
 
 nonchain 在依赖管理上保持克制：
 
-- 核心模块仅依赖 `openai-java` 和 `jtokkit`（Token 计数）两个外部库
+- 核心模块仅依赖 `openai-java`、`jackson-databind`（JSON 序列化）和 `jtokkit`（Token 计数）三个外部库
 - 各功能模块的 optional 依赖不会自动传递
 - 不引入 Spring、Guava 等重量级框架
 - 使用 JDK 内置的 `java.util.function`、`java.util.stream` 等标准 API

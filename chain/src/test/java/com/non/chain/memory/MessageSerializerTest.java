@@ -1,4 +1,4 @@
-package com.non.chain.mysql;
+package com.non.chain.memory;
 
 import com.non.chain.ContentPart;
 import com.non.chain.ImageUrlPart;

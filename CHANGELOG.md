@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.7.6] - 2026-04-24
+
+### 新增
+
+- `chain-postgres` 子模块：PostgreSQL 持久化存储
+  - `PostgresChatMemoryStore`：基于 JDBC + DataSource 的对话消息持久化，与 `MysqlChatMemoryStore` 保持一致的事务语义
+  - `chat_memory_message.sql` 建表脚本（PostgreSQL 语法：BIGSERIAL、CREATE INDEX IF NOT EXISTS）
+- `chain` 核心模块新增 `jackson-databind` 依赖
+
+### 变更
+
+- `MessageSerializer` 从 `chain-mysql` 提取到 `chain` 核心模块（`com.non.chain.memory` 包），供所有存储实现共用
+- `MysqlChatMemoryStore` 改为引用核心模块的 `MessageSerializer`，`chain-mysql` 不再单独依赖 `jackson-databind`
+
 ## [0.7.5] - 2026-04-22
 
 ### 新增

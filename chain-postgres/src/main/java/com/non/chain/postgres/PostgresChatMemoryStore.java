@@ -1,4 +1,4 @@
-package com.non.chain.mysql;
+package com.non.chain.postgres;
 
 import com.non.chain.Message;
 import com.non.chain.memory.ChatMemoryStore;
@@ -13,14 +13,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * MySQL 存储实现。
+ * PostgreSQL 存储实现。
  *
- * <p>使用 JDBC + DataSource 将消息持久化到 MySQL。
+ * <p>使用 JDBC + DataSource 将消息持久化到 PostgreSQL。
  * 表结构参见 {@code chat_memory_message.sql}。</p>
  *
  * <pre>{@code
- * DataSource dataSource = ...; // HikariCP, Druid 等
- * ChatMemoryStore store = new MysqlChatMemoryStore(dataSource);
+ * DataSource dataSource = ...; // HikariCP, etc.
+ * ChatMemoryStore store = new PostgresChatMemoryStore(dataSource);
  *
  * ChatMemory memory = MessageWindowChatMemory.builder()
  *     .store(store)
@@ -29,7 +29,7 @@ import java.util.List;
  *     .build();
  * }</pre>
  */
-public class MysqlChatMemoryStore implements ChatMemoryStore {
+public class PostgresChatMemoryStore implements ChatMemoryStore {
 
     private static final String TABLE_NAME = "chat_memory_message";
 
@@ -46,7 +46,7 @@ public class MysqlChatMemoryStore implements ChatMemoryStore {
 
     private final DataSource dataSource;
 
-    public MysqlChatMemoryStore(DataSource dataSource) {
+    public PostgresChatMemoryStore(DataSource dataSource) {
         this.dataSource = dataSource;
     }
 
@@ -75,13 +75,11 @@ public class MysqlChatMemoryStore implements ChatMemoryStore {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // 删除旧消息
                 try (PreparedStatement ps = conn.prepareStatement(DELETE_MESSAGES)) {
                     ps.setString(1, conversationId);
                     ps.executeUpdate();
                 }
 
-                // 批量插入新消息
                 try (PreparedStatement ps = conn.prepareStatement(INSERT_MESSAGE)) {
                     for (int i = 0; i < messages.size(); i++) {
                         Message msg = messages.get(i);

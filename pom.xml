@@ -5,7 +5,7 @@
 
   <groupId>com.non</groupId>
   <artifactId>nonchain</artifactId>
-  <version>0.7.5</version>
+  <version>0.7.6</version>
   <packaging>pom</packaging>
 
   <name>nonchain</name>
@@ -16,6 +16,7 @@
     <module>chain-document</module>
     <module>chain-example</module>
     <module>chain-mysql</module>
+    <module>chain-postgres</module>
   </modules>
 
   <properties>

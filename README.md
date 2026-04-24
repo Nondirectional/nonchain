@@ -40,7 +40,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.7.5</version>
+    <version>0.7.6</version>
 </dependency>
 ```
 
@@ -50,7 +50,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.7.5</version>
+    <version>0.7.6</version>
 </dependency>
 ```
 
@@ -60,7 +60,9 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.7.5</version>
+    <version>0.7.6</version>
+```
+
 </dependency>
 ```
 
@@ -284,9 +286,11 @@ for (SearchResult result : response.results()) {
 
 | 模块 | 说明 |
 |------|------|
-| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、统一回调 (ChainCallback)、知识存储接口、文档模型、Embedding、多模态消息 |
+| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、统一回调 (ChainCallback)、知识存储接口、文档模型、Embedding、多模态消息、MessageSerializer |
 | `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 5 种文档切分策略 |
 | `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、原生 retriever 混合检索 |
+| `chain-mysql` | MySQL 对话记忆持久化存储 |
+| `chain-postgres` | PostgreSQL 对话记忆持久化存储 |
 | `chain-example` | 示例代码（可运行 Demo） |
 
 ## 架构
