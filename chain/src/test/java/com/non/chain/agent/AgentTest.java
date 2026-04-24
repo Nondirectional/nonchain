@@ -1,5 +1,6 @@
 package com.non.chain.agent;
 
+import com.non.chain.ChatChunk;
 import com.non.chain.ChatResult;
 import com.non.chain.Message;
 import com.non.chain.provider.LLM;
@@ -8,8 +9,10 @@ import com.non.chain.tool.ToolRegistry;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.junit.Assert.*;
 
@@ -67,8 +70,27 @@ public class AgentTest {
         }
 
         @Override
-        public ChatResult streamChat(List<Message> messages, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<com.non.chain.ChatChunk> callback) {
-            throw new UnsupportedOperationException();
+        public ChatResult streamChat(List<Message> messages, List<com.non.chain.tool.Tool> tools, com.non.chain.OutputFormat outputFormat, java.util.function.Consumer<ChatChunk> callback) {
+            capturedMessages.add(new ArrayList<>(messages));
+            ChatResult response = responses.get(callIndex++);
+            // Simulate streaming: emit content chunk then finish chunk
+            if (response.content() != null && !response.content().isEmpty()) {
+                callback.accept(new ChatChunk(response.content(), null, null, null));
+            }
+            if (response.thinkingContent() != null && !response.thinkingContent().isEmpty()) {
+                callback.accept(new ChatChunk(null, response.thinkingContent(), null, null));
+            }
+            if (response.hasToolCalls()) {
+                // Emit tool call deltas (one per tool call, with full args)
+                java.util.List<ChatChunk.DeltaToolCall> deltas = new java.util.ArrayList<>();
+                for (int i = 0; i < response.toolCalls().size(); i++) {
+                    ToolCall tc = response.toolCalls().get(i);
+                    deltas.add(new ChatChunk.DeltaToolCall(i, tc.id(), tc.name(), tc.arguments()));
+                }
+                callback.accept(new ChatChunk(null, null, deltas, null));
+            }
+            callback.accept(new ChatChunk(null, null, null, "stop"));
+            return response;
         }
 
         List<List<Message>> getCapturedMessages() {
@@ -260,5 +282,144 @@ public class AgentTest {
         // 不抛异常即可验证默认值正常
         ChatResult result = agent.run("test");
         assertEquals("ok", result.content());
+    }
+
+    // ---- 流式测试 ----
+
+    @Test
+    public void testStreamingDirectResponse() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("流式回复内容", null)
+        ));
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry).build();
+
+        List<AgentEvent> events = new ArrayList<>();
+        ChatResult result = agent.run("测试", events::add);
+
+        assertEquals("流式回复内容", result.content());
+
+        // Should have: RoundStart, TextDelta, RoundEnd, Complete
+        assertEventTypes(events,
+                AgentEvent.RoundStart.class,
+                AgentEvent.TextDelta.class,
+                AgentEvent.RoundEnd.class,
+                AgentEvent.Complete.class);
+    }
+
+    @Test
+    public void testStreamingWithToolCalls() {
+        ToolCall toolCall = new ToolCall("call_1", "get_weather", "{\"city\":\"北京\"}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
+        responses.add(new ChatResult("北京晴天", null));
+
+        MockLLM llm = new MockLLM(responses);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("get_weather", "查询天气")
+                .handle(args -> args.getString("city") + "晴天");
+
+        Agent agent = Agent.builder(llm, registry).build();
+
+        List<AgentEvent> events = new ArrayList<>();
+        ChatResult result = agent.run("北京天气", events::add);
+
+        assertEquals("北京晴天", result.content());
+
+        // Round 1: RoundStart, ToolCallDelta, RoundEnd, ToolStart, ToolEnd
+        // Round 2: RoundStart, TextDelta, RoundEnd, Complete
+        assertTrue(events.stream().anyMatch(e -> e instanceof AgentEvent.ToolCallDelta));
+        assertTrue(events.stream().anyMatch(e -> e instanceof AgentEvent.ToolStart));
+        assertTrue(events.stream().anyMatch(e -> e instanceof AgentEvent.ToolEnd));
+        assertTrue(events.stream().anyMatch(e -> e instanceof AgentEvent.Complete));
+
+        // Verify ToolStart/ToolEnd contain correct tool info
+        AgentEvent.ToolStart toolStart = (AgentEvent.ToolStart) events.stream()
+                .filter(e -> e instanceof AgentEvent.ToolStart).findFirst().orElse(null);
+        assertNotNull(toolStart);
+        assertEquals("get_weather", toolStart.toolName());
+        assertEquals("{\"city\":\"北京\"}", toolStart.arguments());
+    }
+
+    @Test
+    public void testStreamingWithThinking() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("回复", "思考过程")
+        ));
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry).build();
+
+        List<AgentEvent> events = new ArrayList<>();
+        agent.run("测试", events::add);
+
+        assertTrue(events.stream().anyMatch(e -> e instanceof AgentEvent.ThinkingDelta));
+        AgentEvent.ThinkingDelta thinking = (AgentEvent.ThinkingDelta) events.stream()
+                .filter(e -> e instanceof AgentEvent.ThinkingDelta).findFirst().orElse(null);
+        assertEquals("思考过程", thinking.delta());
+    }
+
+    @Test
+    public void testStreamingMaxIterationsError() {
+        ToolCall toolCall = new ToolCall("call_1", "search", "{\"q\":\"test\"}");
+        List<ChatResult> endlessResponses = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            endlessResponses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
+        }
+
+        MockLLM llm = new MockLLM(endlessResponses);
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("search", "搜索").handle(args -> "结果");
+
+        Agent agent = Agent.builder(llm, registry).maxIterations(3).build();
+
+        List<AgentEvent> events = new ArrayList<>();
+        try {
+            agent.run("测试", events::add);
+            fail("应抛出 AgentException");
+        } catch (AgentException e) {
+            assertTrue(e.getMessage().contains("超出最大迭代次数"));
+            // Should have AgentError event before exception
+            assertTrue(events.stream().anyMatch(ev -> ev instanceof AgentEvent.AgentError));
+        }
+    }
+
+    @Test
+    public void testStreamingRunPreservesExistingBehavior() {
+        // Without eventConsumer, behavior is identical to non-streaming
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("回复", null)
+        ));
+        ToolRegistry registry = new ToolRegistry();
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("测试"); // no eventConsumer
+
+        assertEquals("回复", result.content());
+    }
+
+    @Test
+    public void testStreamingWithMessageList() {
+        MockLLM llm = new MockLLM(Collections.singletonList(
+                new ChatResult("回复", null)
+        ));
+        ToolRegistry registry = new ToolRegistry();
+        Agent agent = Agent.builder(llm, registry).build();
+
+        List<Message> messages = new ArrayList<>();
+        messages.add(Message.user("你好"));
+
+        List<AgentEvent> events = new ArrayList<>();
+        ChatResult result = agent.run(messages, events::add);
+
+        assertEquals("回复", result.content());
+        assertFalse(events.isEmpty());
+    }
+
+    private void assertEventTypes(List<AgentEvent> events, Class<?>... expectedTypes) {
+        List<Class<?>> actualTypes = events.stream().map(Object::getClass).collect(Collectors.toList());
+        assertEquals(Arrays.asList(expectedTypes), actualTypes);
     }
 }

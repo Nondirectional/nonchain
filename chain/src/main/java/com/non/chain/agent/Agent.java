@@ -1,7 +1,9 @@
 package com.non.chain.agent;
 
+import com.non.chain.ChatChunk;
 import com.non.chain.ChatResult;
 import com.non.chain.Message;
+import com.non.chain.OutputFormat;
 import com.non.chain.callback.ChainCallback;
 import com.non.chain.callback.ChainCallbackUtil;
 import com.non.chain.callback.ChainContext;
@@ -20,6 +22,7 @@ import com.non.chain.tool.ToolRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Agent：LLM + 工具循环
@@ -105,46 +108,126 @@ public class Agent {
         return runWithLoop(new ArrayList<>(messages));
     }
 
+    /**
+     * 流式查询入口
+     */
+    public ChatResult run(String query, Consumer<AgentEvent> eventConsumer) {
+        if (memory != null) {
+            memory.add(Message.user(query));
+            List<Message> messages = new ArrayList<>();
+            if (systemPrompt != null && !systemPrompt.isBlank()) {
+                messages.add(Message.system(systemPrompt));
+            }
+            List<Message> history = memory.messages();
+            int historyEnd = messages.size() + history.size();
+            messages.addAll(history);
+            ChatResult result = runWithLoop(messages, eventConsumer);
+            for (int i = historyEnd; i < messages.size(); i++) {
+                memory.add(messages.get(i));
+            }
+            return result;
+        }
+        List<Message> messages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isBlank()) {
+            messages.add(Message.system(systemPrompt));
+        }
+        messages.add(Message.user(query));
+        return runWithLoop(messages, eventConsumer);
+    }
+
+    /**
+     * 流式多轮对话入口
+     */
+    public ChatResult run(List<Message> messages, Consumer<AgentEvent> eventConsumer) {
+        return runWithLoop(new ArrayList<>(messages), eventConsumer);
+    }
+
     private ChatResult runWithLoop(List<Message> messages) {
+        return runWithLoop(messages, null);
+    }
+
+    private ChatResult runWithLoop(List<Message> messages, Consumer<AgentEvent> eventConsumer) {
         String traceId = ChainTrace.generate();
         ChainTrace.set(traceId);
         try {
-            return doRunWithLoop(messages);
+            return doRunWithLoop(messages, eventConsumer);
         } finally {
             ChainTrace.clear();
         }
     }
 
-    private ChatResult doRunWithLoop(List<Message> messages) {
+    private ChatResult doRunWithLoop(List<Message> messages, Consumer<AgentEvent> eventConsumer) {
         List<Tool> tools = toolRegistry.getTools();
         String traceId = ChainTrace.get();
 
-        for (int i = 0; i < maxIterations; i++) {
+        for (int round = 0; round < maxIterations; round++) {
+            if (eventConsumer != null) {
+                eventConsumer.accept(new AgentEvent.RoundStart(round + 1));
+            }
+
             callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
             ChatResult result;
             long start = System.currentTimeMillis();
             try {
-                result = llm.chat(messages, tools);
+                if (eventConsumer != null) {
+                    result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
+                        if (chunk.hasContent()) {
+                            eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
+                        }
+                        if (chunk.hasThinking()) {
+                            eventConsumer.accept(new AgentEvent.ThinkingDelta(chunk.deltaThinking()));
+                        }
+                        if (chunk.hasToolCalls()) {
+                            for (ChatChunk.DeltaToolCall dtc : chunk.deltaToolCalls()) {
+                                eventConsumer.accept(new AgentEvent.ToolCallDelta(
+                                        dtc.index(), dtc.id(), dtc.name(), dtc.argumentsDelta()));
+                            }
+                        }
+                    });
+                } else {
+                    result = llm.chat(messages, tools);
+                }
                 long latencyMs = System.currentTimeMillis() - start;
                 callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
             } catch (Exception e) {
                 long latencyMs = System.currentTimeMillis() - start;
                 callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.AgentError(e));
+                }
                 throw e;
             }
             messages.add(result.toMessage());
 
+            if (eventConsumer != null) {
+                eventConsumer.accept(new AgentEvent.RoundEnd(round + 1));
+            }
+
             if (!result.hasToolCalls()) {
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.Complete(result));
+                }
                 return result;
             }
 
             for (ToolCall tc : result.toolCalls()) {
-                String output = safeExecute(tc, traceId);
+                String output;
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                }
+                output = safeExecute(tc, traceId);
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                }
                 messages.add(Message.toolResult(tc.id(), output));
             }
         }
 
-        throw new AgentException("超出最大迭代次数: " + maxIterations);
+        AgentException ex = new AgentException("超出最大迭代次数: " + maxIterations);
+        if (eventConsumer != null) {
+            eventConsumer.accept(new AgentEvent.AgentError(ex));
+        }
+        throw ex;
     }
 
     /**
