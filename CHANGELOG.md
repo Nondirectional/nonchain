@@ -4,6 +4,20 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.8.0] - 2026-06-11
+
+### 新增
+
+- Agent 工具并行执行：当单次 LLM 响应包含多个工具调用时，可通过 `Executor` 并行执行，按原始顺序组装结果
+  - `Agent.Builder.executor(Executor)`：设置线程池，默认使用 `ForkJoinPool.commonPool()`；设为 `null` 时串行执行
+  - 并行模式下各工具独立执行，`AgentEvent.ToolStart`/`ToolEnd` 事件按实际执行时序触发，结果按调用顺序追加到 messages
+  - 单个工具调用或未配置 executor 时保持原有串行执行逻辑，完全向后兼容
+- `AbstractOpenAILLM` 新增连接超时配置：connect 30s、read 180s、write 60s
+
+### 变更
+
+- `DashscopeLLM.applyThinkingParams()` 覆写：始终显式发送 `enable_thinking` 参数，修复 Qwen3 模型非流式调用时 thinking 默认开启导致请求失败的问题
+
 ## [0.7.7] - 2026-04-24
 
 ### 新增

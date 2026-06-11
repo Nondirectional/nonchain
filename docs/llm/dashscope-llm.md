@@ -263,7 +263,7 @@ LLM llm2 = new DashscopeLLM("sk-xxx", "qwen-plus")
 https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 
-思考模式通过在请求体中添加 `enable_thinking` 和 `thinking_budget` 扩展字段实现，结构化输出通过 `response_format` 参数设置为 `json_object` 实现。`temperature` 和 `topP` 通过 OpenAI SDK 标准参数传递，`topK` 通过 `additionalBodyProperty` 传递（非 OpenAI 标准参数，DashScope 特有）。建议 `temperature` 和 `topP` 只设置其中一个。
+思考模式通过在请求体中添加 `enable_thinking` 和 `thinking_budget` 扩展字段实现。`DashscopeLLM` 覆写了 thinking 参数的发送逻辑：由于 Qwen3 系列模型默认 `enable_thinking=true`，即使未启用思考模式也会始终显式发送 `enable_thinking` 参数，以确保非思考模式正常工作。这与通用 OpenAI 兼容 provider 的行为不同（后者仅在启用时才发送该参数）。结构化输出通过 `response_format` 参数设置为 `json_object` 实现。`temperature` 和 `topP` 通过 OpenAI SDK 标准参数传递，`topK` 通过 `additionalBodyProperty` 传递（非 OpenAI 标准参数，DashScope 特有）。建议 `temperature` 和 `topP` 只设置其中一个。
 
 ## 相关文档
 

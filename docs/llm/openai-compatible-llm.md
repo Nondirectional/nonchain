@@ -14,7 +14,7 @@
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.7.0</version>
+    <version><!-- use latest --></version>
 </dependency>
 ```
 
@@ -107,6 +107,18 @@ Agent agent = Agent.builder(llm, registry)
 
 String response = agent.run("帮我搜索一下 Java 的新特性");
 ```
+
+## HTTP 超时配置
+
+`AbstractOpenAILLM` 构造时设置了以下默认超时时间：
+
+| 阶段 | 超时时间 |
+|------|----------|
+| 连接超时 (connect) | 30 秒 |
+| 读取超时 (read) | 180 秒 |
+| 写入超时 (write) | 60 秒 |
+
+该配置应用于所有继承自 `AbstractOpenAILLM` 的 provider（DashscopeLLM、OpenAICompatibleLLM、VLLM）。当前不支持通过 API 自定义超时时间。
 
 ## Provider 继承体系
 
