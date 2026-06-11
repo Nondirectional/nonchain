@@ -2,7 +2,6 @@ package com.non.chain.memory;
 
 import com.non.chain.Message;
 
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -76,8 +75,8 @@ public class MessageWindowChatMemory implements ChatMemory {
      * <p>规则：</p>
      * <ol>
      *   <li>SystemMessage（索引 0 且 role="system"）永不删除</li>
-     *   <li>assistant 消息带 toolCalls 时，紧随其后的 tool 消息与之配对，
-     *       删除时必须一起删除</li>
+     *   <li>assistant 消息带 toolCalls 时，相关 tool 消息应尽量成组保留/删除，
+     *       包括异常顺序下的防御式配对</li>
      *   <li>从最老的非 system 消息开始删除</li>
      * </ol>
      */
@@ -99,40 +98,17 @@ public class MessageWindowChatMemory implements ChatMemory {
      * 找到第一个可删除的消息索引（跳过索引 0 的 system 消息）
      */
     private int findFirstDeletableIndex(List<Message> messages) {
-        int start = isSystemMessage(messages, 0) ? 1 : 0;
-        if (start >= messages.size()) {
-            return -1;
-        }
-        return start;
+        return ChatMemoryTrimSupport.findFirstDeletableIndex(messages);
     }
 
     /**
      * 计算从 index 开始的消息组大小。
      *
-     * <p>如果该消息是带 toolCalls 的 assistant 消息，
-     * 则包含紧随其后的所有 tool 消息（保持配对完整性）。</p>
+     * <p>正常顺序下保护 assistant(toolCalls) + tool，异常顺序下也尝试将
+     * 连续的 tool 与其后紧邻的 assistant(toolCalls) 作为一组删除。</p>
      */
     private int countMessageGroup(List<Message> messages, int index) {
-        Message msg = messages.get(index);
-        // 如果是带工具调用的 assistant 消息
-        if ("assistant".equals(msg.role()) && msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
-            int count = 1;
-            // 统计紧随其后的 tool 消息数量
-            for (int i = index + 1; i < messages.size(); i++) {
-                if ("tool".equals(messages.get(i).role())) {
-                    count++;
-                } else {
-                    break;
-                }
-            }
-            return count;
-        }
-        // 如果是 tool 消息（无对应 assistant），也单独处理
-        return 1;
-    }
-
-    private boolean isSystemMessage(List<Message> messages, int index) {
-        return index == 0 && !messages.isEmpty() && "system".equals(messages.get(0).role());
+        return ChatMemoryTrimSupport.countMessageGroup(messages, index);
     }
 
     public static class Builder {

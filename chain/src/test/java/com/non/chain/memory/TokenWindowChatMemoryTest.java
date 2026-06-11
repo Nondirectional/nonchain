@@ -175,4 +175,63 @@ public class TokenWindowChatMemoryTest {
 
         assertEquals(2, memory.messages().size());
     }
+
+    @Test
+    public void testReversedToolAssistantPairTrimmedTogether() {
+        // maxTokens 极低，必定触发裁剪
+        ChatMemory memory = TokenWindowChatMemory.builder()
+                .tokenizer(JtokkitTokenizer.defaults())
+                .maxTokens(40)
+                .conversationId("test-reversed-pair")
+                .build();
+
+        ToolCall toolCall = new ToolCall("call-1", "get_weather", "{\"city\":\"北京\"}");
+        // 异常顺序：tool 在 assistant(toolCalls) 之前
+        memory.add(Message.toolResult("call-1", "晴天，25度"));
+        memory.add(Message.assistantWithToolCalls(null, Arrays.asList(toolCall)));
+        memory.add(Message.user("上海天气如何"));
+        memory.add(Message.assistant("上海多云"));
+
+        List<Message> messages = memory.messages();
+
+        // 核心断言：不会留下孤立的 assistant(toolCalls)（没有匹配 tool）
+        for (int i = 0; i < messages.size(); i++) {
+            if ("assistant".equals(messages.get(i).role())
+                    && messages.get(i).toolCalls() != null
+                    && !messages.get(i).toolCalls().isEmpty()) {
+                boolean hasToolResult = false;
+                for (int j = 0; j < messages.size(); j++) {
+                    if ("tool".equals(messages.get(j).role())) {
+                        hasToolResult = true;
+                        break;
+                    }
+                }
+                assertTrue("assistant(toolCalls) must not exist without matching tool",
+                        hasToolResult);
+            }
+        }
+    }
+
+    @Test
+    public void testTrulyOrphanToolMessageCanBeDeleted() {
+        ChatMemory memory = TokenWindowChatMemory.builder()
+                .tokenizer(JtokkitTokenizer.defaults())
+                .maxTokens(30)
+                .conversationId("test-orphan-tool")
+                .build();
+
+        // 真正孤立的 tool（没有匹配的 assistant(toolCalls)）
+        memory.add(Message.toolResult("call-unknown", "过期结果"));
+        memory.add(Message.user("问题1问题1问题1"));
+        memory.add(Message.assistant("回答1回答1回答1"));
+        memory.add(Message.user("问题2问题2问题2"));
+        memory.add(Message.assistant("回答2回答2回答2"));
+
+        List<Message> messages = memory.messages();
+        // 孤立的 tool 应该被删除
+        for (Message msg : messages) {
+            assertFalse("Truly orphan tool should be trimmed",
+                    "tool".equals(msg.role()) && "call-unknown".equals(msg.toolCallId()));
+        }
+    }
 }

@@ -4,6 +4,15 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.8.1] - 2026-06-11
+
+### 修复
+
+- ChatMemory 裁剪边界修复：当异常消息顺序导致 `tool` 消息出现在其配对的 `assistant(toolCalls)` 之前时，不再单独删除该 `tool` 消息，避免留下无对应 `tool_result` 的无效 LLM 上下文
+  - 新增 `ChatMemoryTrimSupport` 共享辅助类，统一处理正向（assistant→tool）和反向（tool→assistant）的配对裁剪
+  - `MessageWindowChatMemory` 和 `TokenWindowChatMemory` 委托给共享类，消除重复逻辑
+  - 真正孤立的 `tool` 消息（无匹配的 assistant）仍可被单独删除
+
 ## [0.8.0] - 2026-06-11
 
 ### 新增
