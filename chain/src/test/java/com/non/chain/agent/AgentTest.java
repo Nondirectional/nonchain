@@ -171,6 +171,127 @@ public class AgentTest {
     }
 
     @Test
+    public void testParallelToolExecution() {
+        // 验证多个工具并行执行，结果按源顺序组装
+        ToolCall tc1 = new ToolCall("call_1", "get_weather", "{\"location\":\"北京\"}");
+        ToolCall tc2 = new ToolCall("call_2", "get_weather", "{\"location\":\"上海\"}");
+        ToolCall tc3 = new ToolCall("call_3", "get_time", "{\"city\":\"北京\"}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, List.of(tc1, tc2, tc3)));
+        responses.add(new ChatResult("三城天气和时间已查", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        // 用线程安全列表记录执行顺序
+        List<String> executionOrder = Collections.synchronizedList(new ArrayList<>());
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("get_weather", "查询天气")
+                .handle(args -> {
+                    executionOrder.add("weather:" + args.getString("location"));
+                    return args.getString("location") + "晴天";
+                });
+        registry.register("get_time", "查询时间")
+                .handle(args -> {
+                    executionOrder.add("time:" + args.getString("city"));
+                    return args.getString("city") + "12:00";
+                });
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("北京和上海天气及时间");
+
+        assertEquals("三城天气和时间已查", result.content());
+
+        // 验证三个工具都被执行
+        assertEquals(3, executionOrder.size());
+
+        // 验证第二次 LLM 调用中消息按原始顺序排列
+        List<Message> secondCallMessages = llm.getCapturedMessages().get(1);
+        // user, assistant(toolCalls), tool_result_1, tool_result_2, tool_result_3
+        assertEquals("tool", secondCallMessages.get(2).role());
+        assertEquals("call_1", secondCallMessages.get(2).toolCallId());
+        assertTrue(secondCallMessages.get(2).content().contains("北京"));
+
+        assertEquals("call_2", secondCallMessages.get(3).toolCallId());
+        assertTrue(secondCallMessages.get(3).content().contains("上海"));
+
+        assertEquals("call_3", secondCallMessages.get(4).toolCallId());
+        assertTrue(secondCallMessages.get(4).content().contains("12:00"));
+    }
+
+    @Test
+    public void testParallelExecutionWithOneFailure() {
+        // 并行执行中某个工具失败，其他工具正常完成
+        ToolCall tc1 = new ToolCall("call_1", "good_tool", "{}");
+        ToolCall tc2 = new ToolCall("call_2", "bad_tool", "{}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, List.of(tc1, tc2)));
+        responses.add(new ChatResult("部分工具执行完成", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("good_tool", "好工具")
+                .handle(args -> "成功结果");
+        registry.register("bad_tool", "坏工具")
+                .handle(args -> {
+                    throw new RuntimeException("连接超时");
+                });
+
+        Agent agent = Agent.builder(llm, registry).build();
+        ChatResult result = agent.run("测试并行失败");
+
+        assertEquals("部分工具执行完成", result.content());
+
+        // 验证两个工具结果都传给 LLM（包括失败的那个）
+        List<Message> secondCallMessages = llm.getCapturedMessages().get(1);
+        Message goodResult = secondCallMessages.get(2);
+        Message badResult = secondCallMessages.get(3);
+        assertEquals("call_1", goodResult.toolCallId());
+        assertEquals("成功结果", goodResult.content());
+        assertEquals("call_2", badResult.toolCallId());
+        assertTrue(badResult.content().contains("工具执行失败"));
+    }
+
+    @Test
+    public void testParallelWithNullExecutorFallsBackToSequential() {
+        // executor 设为 null 时回退到串行执行
+        ToolCall tc1 = new ToolCall("call_1", "tool_a", "{}");
+        ToolCall tc2 = new ToolCall("call_2", "tool_b", "{}");
+
+        List<ChatResult> responses = new ArrayList<>();
+        responses.add(new ChatResult("", null, List.of(tc1, tc2)));
+        responses.add(new ChatResult("完成", null));
+
+        MockLLM llm = new MockLLM(responses);
+
+        List<String> executionOrder = Collections.synchronizedList(new ArrayList<>());
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("tool_a", "工具A")
+                .handle(args -> {
+                    executionOrder.add("A");
+                    return "A结果";
+                });
+        registry.register("tool_b", "工具B")
+                .handle(args -> {
+                    executionOrder.add("B");
+                    return "B结果";
+                });
+
+        Agent agent = Agent.builder(llm, registry)
+                .executor(null)
+                .build();
+        ChatResult result = agent.run("测试");
+
+        assertEquals("完成", result.content());
+        // 串行执行时顺序保证是 A -> B
+        assertEquals(List.of("A", "B"), executionOrder);
+    }
+
+    @Test
     public void testMaxIterationsExceeded() {
         // LLM 一直调用工具，触发最大迭代限制
         ToolCall toolCall = new ToolCall("call_1", "search", "{\"q\":\"test\"}");

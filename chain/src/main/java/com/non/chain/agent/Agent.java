@@ -22,6 +22,9 @@ import com.non.chain.tool.ToolRegistry;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Consumer;
 
 /**
@@ -51,6 +54,7 @@ public class Agent {
     private final int maxIterations;
     private final ChainCallback callback;
     private final ChatMemory memory;
+    private final Executor executor;
 
     private Agent(Builder builder) {
         this.llm = builder.llm;
@@ -59,6 +63,7 @@ public class Agent {
         this.maxIterations = builder.maxIterations;
         this.callback = builder.callback;
         this.memory = builder.memory;
+        this.executor = builder.executor;
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -210,16 +215,48 @@ public class Agent {
                 return result;
             }
 
-            for (ToolCall tc : result.toolCalls()) {
-                String output;
-                if (eventConsumer != null) {
-                    eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+            List<ToolCall> toolCalls = result.toolCalls();
+            boolean parallel = toolCalls.size() > 1 && executor != null;
+
+            if (parallel) {
+                // 并行执行多个工具调用，按源顺序组装结果
+                @SuppressWarnings("unchecked")
+                CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
+                for (int i = 0; i < toolCalls.size(); i++) {
+                    ToolCall tc = toolCalls.get(i);
+                    if (eventConsumer != null) {
+                        eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                    }
+                    final int idx = i;
+                    futures[i] = CompletableFuture.supplyAsync(() -> safeExecute(tc, traceId), executor)
+                            .whenComplete((output, err) -> {
+                                if (eventConsumer != null) {
+                                    eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(),
+                                            err != null ? "工具执行失败: " + err.getMessage() : output));
+                                }
+                            });
                 }
-                output = safeExecute(tc, traceId);
-                if (eventConsumer != null) {
-                    eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                CompletableFuture.allOf(futures).join();
+                // 按原始顺序追加结果到 messages
+                for (int i = 0; i < toolCalls.size(); i++) {
+                    try {
+                        messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
+                    } catch (Exception e) {
+                        messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                    }
                 }
-                messages.add(Message.toolResult(tc.id(), output));
+            } else {
+                // 单个工具调用或未配置 executor，串行执行
+                for (ToolCall tc : toolCalls) {
+                    if (eventConsumer != null) {
+                        eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                    }
+                    String output = safeExecute(tc, traceId);
+                    if (eventConsumer != null) {
+                        eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                    }
+                    messages.add(Message.toolResult(tc.id(), output));
+                }
             }
         }
 
@@ -256,6 +293,7 @@ public class Agent {
         private int maxIterations = DEFAULT_MAX_ITERATIONS;
         private ChainCallback callback;
         private ChatMemory memory;
+        private Executor executor = ForkJoinPool.commonPool();
 
         private Builder(LLM llm, ToolRegistry toolRegistry) {
             this.llm = llm;
@@ -321,6 +359,23 @@ public class Agent {
          */
         public Builder memory(ChatMemory memory) {
             this.memory = memory;
+            return this;
+        }
+
+        /**
+         * 设置用于并行执行多个工具调用的线程池。
+         *
+         * <p>默认使用 {@link ForkJoinPool#commonPool()}。设置为 {@code null} 时
+         * 多个工具调用将串行执行。</p>
+         *
+         * <pre>{@code
+         * Agent agent = Agent.builder(llm, toolRegistry)
+         *     .executor(Executors.newFixedThreadPool(4))
+         *     .build();
+         * }</pre>
+         */
+        public Builder executor(Executor executor) {
+            this.executor = executor;
             return this;
         }
 

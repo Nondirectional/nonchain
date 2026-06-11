@@ -14,11 +14,13 @@ import com.non.chain.tool.ToolCall;
 import com.openai.client.OpenAIClient;
 import com.openai.client.okhttp.OpenAIOkHttpClient;
 import com.openai.core.JsonValue;
+import com.openai.core.Timeout;
 import com.openai.models.ResponseFormatJsonObject;
 import com.openai.models.chat.completions.*;
 import com.openai.core.http.StreamResponse;
 import org.jetbrains.annotations.NotNull;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +51,11 @@ public abstract class AbstractOpenAILLM implements LLM {
         this.client = OpenAIOkHttpClient.builder()
                 .apiKey(apiKey)
                 .baseUrl(baseUrl)
+                .timeout(Timeout.builder()
+                        .connect(Duration.ofSeconds(30))
+                        .read(Duration.ofSeconds(180))
+                        .write(Duration.ofSeconds(60))
+                        .build())
                 .build();
         this.model = model;
         this.callback = ChainCallbackUtil.noop();

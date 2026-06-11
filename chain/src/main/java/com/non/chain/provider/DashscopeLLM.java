@@ -95,7 +95,19 @@ public class DashscopeLLM extends AbstractOpenAILLM {
         return this;
     }
 
-    // ---- 覆写：添加 DashScope 特有的 topK 参数 ----
+    // ---- 覆写：DashScope 特有参数 ----
+
+    /**
+     * DashScope Qwen3 模型默认 enable_thinking=true，且非流式调用要求 enable_thinking=false。
+     * 因此必须始终显式发送 enable_thinking 参数，而非仅在启用时才发送。
+     */
+    @Override
+    protected void applyThinkingParams(ChatCompletionCreateParams.Builder builder) {
+        builder.putAdditionalBodyProperty("enable_thinking", JsonValue.from(isEnableThinking()));
+        if (getThinkingBudget() != null) {
+            builder.putAdditionalBodyProperty("thinking_budget", JsonValue.from(getThinkingBudget()));
+        }
+    }
 
     @Override
     protected void applyAdditionalParams(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat) {

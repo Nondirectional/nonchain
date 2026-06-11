@@ -44,5 +44,6 @@ build/
 .claude/
 .agents/
 .cursor/
+.codex/
 .trellis/
 AGENTS.md
