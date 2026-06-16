@@ -157,6 +157,12 @@ PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100);
 
 // 自定义 OCR 引擎、扫描件检测阈值和 OCR 渲染 DPI（默认 300，数值越大越清晰但越慢）
 PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100, 300);
+
+// 自定义 OCR 引擎、扫描件检测阈值和图片覆盖率阈值（应对带 OCR 文字层的扫描件）
+PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100, 0.3, 0.5);
+
+// 全参数：OCR 引擎、扫描件检测阈值、OCR 渲染 DPI、单页大图覆盖率阈值、文档级图片覆盖率阈值
+PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100, 300, 0.3, 0.5);
 ```
 
 | 构造函数 | 说明 |
@@ -165,14 +171,23 @@ PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100, 300);
 | `PdfDocumentReader(OcrEngine)` | 带默认扫描件阈值（50） |
 | `PdfDocumentReader(OcrEngine, int)` | 自定义扫描件阈值 |
 | `PdfDocumentReader(OcrEngine, int, int)` | 自定义扫描件阈值和 OCR 渲染 DPI（默认 300） |
+| `PdfDocumentReader(OcrEngine, int, double, double)` | 自定义扫描件阈值 + 图片覆盖率阈值（单页大图阈值 / 文档覆盖率阈值，默认 0.3 / 0.5） |
+| `PdfDocumentReader(OcrEngine, int, int, double, double)` | 全参数：扫描件阈值、OCR 渲染 DPI、单页大图阈值、文档覆盖率阈值 |
 
 ### 扫描件检测
 
-默认扫描件检测阈值为 50 个字符/页。计算方式：
+扫描件检测基于两个维度（OR 关系，任一满足即判定为扫描件）：
+
+1. **文字密度低：** 每页平均文本字符数低于阈值（默认 50 字符/页）
+2. **图片覆盖率高：** 「图片重页面」（单页存在渲染面积占比 ≥ `largeImagePageThreshold` 默认 0.3 的图片，用 CTM 行列式计算，正确处理旋转/剪切）占总页数比例 ≥ `imageCoverageThreshold`（默认 0.5）
 
 ```
-isScanned = (总文本字符数 / 页数) < scanThreshold
+维度1: (总文本字符数 / 页数) < scanThreshold
+维度2: 图片重页面数 / 页数 >= imageCoverageThreshold
+isScanned = 维度1 OR 维度2
 ```
+
+维度 2 专门应对带 OCR 文字层的扫描件：这类文档文字密度正常（已填充可提取文字），但整页仍是大图扫描，单一文字密度维度无法识别。
 
 当检测到扫描件且提供了 OCR 引擎时，会丢弃原始文本提取结果，改用 OCR 逐页识别。
 

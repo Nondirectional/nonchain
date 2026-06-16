@@ -33,6 +33,8 @@ import org.apache.pdfbox.contentstream.operator.OperatorName;
 import org.apache.pdfbox.contentstream.operator.state.*;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.util.Matrix;
 
 public class PdfDocumentReader implements DocumentReader {
 
@@ -46,10 +48,20 @@ public class PdfDocumentReader implements DocumentReader {
      * 默认 OCR 渲染 DPI：扫描件每页渲染为图片的分辨率
      */
     private static final int DEFAULT_RENDER_DPI = 300;
+    /**
+     * 默认单页大图覆盖率阈值：该页任一图片渲染面积占页面面积比例达到此值视为"图片重页面"
+     */
+    private static final double DEFAULT_LARGE_IMAGE_PAGE_THRESHOLD = 0.3;
+    /**
+     * 默认文档级图片覆盖率阈值：图片重页面占总页数比例达到此值视为扫描件
+     */
+    private static final double DEFAULT_IMAGE_COVERAGE_THRESHOLD = 0.5;
 
     private final OcrEngine ocrEngine;
     private final int scanThreshold;
     private final int renderDpi;
+    private final double largeImagePageThreshold;
+    private final double imageCoverageThreshold;
 
     public PdfDocumentReader() {
         this(null);
@@ -67,12 +79,40 @@ public class PdfDocumentReader implements DocumentReader {
      * @param renderDpi 扫描件 OCR 时每页渲染为图片的 DPI，必须为正数
      */
     public PdfDocumentReader(OcrEngine ocrEngine, int scanThreshold, int renderDpi) {
+        this(ocrEngine, scanThreshold, renderDpi,
+                DEFAULT_LARGE_IMAGE_PAGE_THRESHOLD, DEFAULT_IMAGE_COVERAGE_THRESHOLD);
+    }
+
+    /**
+     * @param largeImagePageThreshold  单页大图覆盖率阈值（0-1）：该页任一图片渲染面积占页面面积比例达到此值视为"图片重页面"
+     * @param imageCoverageThreshold   文档级图片覆盖率阈值（0-1）：图片重页面占总页数比例达到此值视为扫描件
+     */
+    public PdfDocumentReader(OcrEngine ocrEngine, int scanThreshold,
+                             double largeImagePageThreshold, double imageCoverageThreshold) {
+        this(ocrEngine, scanThreshold, DEFAULT_RENDER_DPI, largeImagePageThreshold, imageCoverageThreshold);
+    }
+
+    /**
+     * @param renderDpi                扫描件 OCR 时每页渲染为图片的 DPI，必须为正数
+     * @param largeImagePageThreshold  单页大图覆盖率阈值（0-1）：该页任一图片渲染面积占页面面积比例达到此值视为"图片重页面"
+     * @param imageCoverageThreshold   文档级图片覆盖率阈值（0-1）：图片重页面占总页数比例达到此值视为扫描件
+     */
+    public PdfDocumentReader(OcrEngine ocrEngine, int scanThreshold, int renderDpi,
+                             double largeImagePageThreshold, double imageCoverageThreshold) {
         if (renderDpi <= 0) {
             throw new IllegalArgumentException("渲染 DPI 必须为正数: " + renderDpi);
+        }
+        if (largeImagePageThreshold < 0 || largeImagePageThreshold > 1) {
+            throw new IllegalArgumentException("单页大图覆盖率阈值必须在 0-1 之间: " + largeImagePageThreshold);
+        }
+        if (imageCoverageThreshold < 0 || imageCoverageThreshold > 1) {
+            throw new IllegalArgumentException("文档级图片覆盖率阈值必须在 0-1 之间: " + imageCoverageThreshold);
         }
         this.ocrEngine = ocrEngine;
         this.scanThreshold = scanThreshold;
         this.renderDpi = renderDpi;
+        this.largeImagePageThreshold = largeImagePageThreshold;
+        this.imageCoverageThreshold = imageCoverageThreshold;
     }
 
     @Override
@@ -86,6 +126,7 @@ public class PdfDocumentReader implements DocumentReader {
         try {
             int pageCount = document.getNumberOfPages();
             List<DocumentElement> elements = new ArrayList<>();
+            int imageHeavyPages = 0;
 
             // 第一遍：正常提取文本和图片
             for (int i = 0; i < pageCount; i++) {
@@ -95,12 +136,14 @@ public class PdfDocumentReader implements DocumentReader {
                 // Extract text from this page
                 extractTextElements(document, i + 1, elements);
 
-                // Extract images from this page
-                extractImageElements(page, pageNumber, elements);
+                // Extract images from this page，并统计该页是否为图片重页面
+                if (extractImageElements(page, pageNumber, elements)) {
+                    imageHeavyPages++;
+                }
             }
 
             // 检测是否为扫描件，如果是且有 OCR 引擎则重新提取
-            boolean scanned = isScanned(elements, pageCount);
+            boolean scanned = isScanned(elements, pageCount, imageHeavyPages);
             if (scanned && ocrEngine != null) {
                 elements = extractWithOcr(document, pageCount);
             }
@@ -122,9 +165,14 @@ public class PdfDocumentReader implements DocumentReader {
 
     /**
      * 检测文档是否为扫描件。
-     * 计算所有 TEXT 元素的总字符数，除以页数，低于阈值则为扫描件。
+     * <p>
+     * 两个维度（OR 关系）：
+     * <ol>
+     *   <li>文字密度低：TEXT/HEADING 元素总字符数 / 页数 &lt; scanThreshold</li>
+     *   <li>图片覆盖率达标：图片重页面数 / 总页数 &gt;= imageCoverageThreshold（应对带 OCR 文字层的扫描件）</li>
+     * </ol>
      */
-    private boolean isScanned(List<DocumentElement> elements, int pageCount) {
+    private boolean isScanned(List<DocumentElement> elements, int pageCount, int imageHeavyPages) {
         if (pageCount == 0) {
             return false;
         }
@@ -137,7 +185,13 @@ public class PdfDocumentReader implements DocumentReader {
                     return ((HeadingElement) e).content().length();
                 })
                 .sum();
-        return totalChars / pageCount < scanThreshold;
+        // 维度1：文字密度低 → 直接判扫描件
+        if (totalChars / pageCount < scanThreshold) {
+            return true;
+        }
+        // 维度2：图片覆盖率达标 → 应对带 OCR 文字层的扫描件
+        double imagePageRatio = (double) imageHeavyPages / pageCount;
+        return imagePageRatio >= imageCoverageThreshold;
     }
 
     /**
@@ -210,12 +264,14 @@ public class PdfDocumentReader implements DocumentReader {
         }
     }
 
-    private void extractImageElements(PDPage page, int pageNumber, List<DocumentElement> elements) {
+    private boolean extractImageElements(PDPage page, int pageNumber, List<DocumentElement> elements) {
         try {
-            ImageExtractor extractor = new ImageExtractor(pageNumber, elements);
+            ImageExtractor extractor = new ImageExtractor(pageNumber, elements, page, largeImagePageThreshold);
             extractor.processPage(page);
+            return extractor.isImageHeavyPage();
         } catch (IOException e) {
             // Skip image extraction on error, continue with other elements
+            return false;
         }
     }
 
@@ -226,11 +282,18 @@ public class PdfDocumentReader implements DocumentReader {
 
         private final int pageNumber;
         private final List<DocumentElement> elements;
+        private final double largeImagePageThreshold;
+        private final double pageArea;
         private int imageIndex = 0;
+        private boolean largeImage = false;
 
-        ImageExtractor(int pageNumber, List<DocumentElement> elements) {
+        ImageExtractor(int pageNumber, List<DocumentElement> elements, PDPage page,
+                       double largeImagePageThreshold) {
             this.pageNumber = pageNumber;
             this.elements = elements;
+            this.largeImagePageThreshold = largeImagePageThreshold;
+            PDRectangle pageRect = page.getCropBox() != null ? page.getCropBox() : page.getMediaBox();
+            this.pageArea = pageRect != null ? pageRect.getWidth() * pageRect.getHeight() : 0.0;
 
             // Register required operators for rendering
             addOperator(new DrawObject());
@@ -238,6 +301,13 @@ public class PdfDocumentReader implements DocumentReader {
             addOperator(new Save());
             addOperator(new Restore());
             addOperator(new SetMatrix());
+        }
+
+        /**
+         * 该页是否存在渲染面积占比超阈值的图片（图片重页面）。
+         */
+        boolean isImageHeavyPage() {
+            return largeImage;
         }
 
         @Override
@@ -250,10 +320,28 @@ public class PdfDocumentReader implements DocumentReader {
 
                 if (xobject instanceof PDImageXObject) {
                     PDImageXObject image = (PDImageXObject) xobject;
+                    markLargeImageIfNeeded();
                     addImageElement(image);
                 }
             } else {
                 super.processOperator(operator, operands);
+            }
+        }
+
+        /**
+         * 用当前图形状态的 CTM 计算图片渲染面积占页面面积的比例，
+         * 超过阈值则标记该页为图片重页面。面积使用 CTM 行列式绝对值，正确处理旋转/剪切。
+         */
+        private void markLargeImageIfNeeded() {
+            if (largeImage || pageArea <= 0.0) {
+                return;
+            }
+            Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
+            double imageArea = Math.abs(
+                    ctm.getScaleX() * ctm.getScaleY() - ctm.getShearX() * ctm.getShearY());
+            double coverageRatio = imageArea / pageArea;
+            if (coverageRatio >= largeImagePageThreshold) {
+                largeImage = true;
             }
         }
 
