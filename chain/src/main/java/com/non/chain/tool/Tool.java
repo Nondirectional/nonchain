@@ -48,6 +48,11 @@ public class Tool {
             if (entry.getValue().enumValues != null && !entry.getValue().enumValues.isEmpty()) {
                 prop.put("enum", entry.getValue().enumValues);
             }
+            if (entry.getValue().items != null) {
+                Map<String, Object> itemsSchema = new LinkedHashMap<>();
+                itemsSchema.put("type", entry.getValue().items.type);
+                prop.put("items", itemsSchema);
+            }
             props.put(entry.getKey(), prop);
         }
 
@@ -103,6 +108,15 @@ public class Tool {
             return this;
         }
 
+        public Builder addProperty(String name, String type, String description, boolean isRequired, String itemsType) {
+            Property items = itemsType != null ? new Property(itemsType, null, null) : null;
+            this.properties.put(name, new Property(type, description, null, items));
+            if (isRequired) {
+                this.required.add(name);
+            }
+            return this;
+        }
+
         public Tool build() {
             return new Tool(name, description, properties, required);
         }
@@ -112,11 +126,17 @@ public class Tool {
         final String type;
         final String description;
         final List<String> enumValues;
+        final Property items;
 
         Property(String type, String description, List<String> enumValues) {
+            this(type, description, enumValues, null);
+        }
+
+        Property(String type, String description, List<String> enumValues, Property items) {
             this.type = type;
             this.description = description;
             this.enumValues = enumValues;
+            this.items = items;
         }
     }
 }

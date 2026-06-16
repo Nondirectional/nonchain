@@ -9,8 +9,14 @@ import com.non.chain.callback.event.ToolCompleteEvent;
 import com.non.chain.callback.event.ToolErrorEvent;
 import com.non.chain.callback.event.ToolStartEvent;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import java.lang.reflect.Array;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -18,6 +24,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * 工具注册中心：支持注解扫描和 fluent API 两种注册方式，统一执行工具调用
  */
 public class ToolRegistry {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Map<String, ToolEntry> entries = new ConcurrentHashMap<>();
     private final ChainCallback callback;
@@ -82,12 +90,20 @@ public class ToolRegistry {
                         .description(def.description());
 
                 Parameter[] params = entry.method.getParameters();
-                for (Parameter param : params) {
+                Type[] genericTypes = entry.method.getGenericParameterTypes();
+                for (int i = 0; i < params.length; i++) {
+                    Parameter param = params[i];
                     ToolParam tp = param.getAnnotation(ToolParam.class);
                     String paramName = tp != null ? tp.name() : param.getName();
                     String paramDesc = tp != null ? tp.description() : "";
                     boolean required = tp == null || tp.required();
-                    builder.addProperty(paramName, javaTypeToJsonType(param.getType()), paramDesc, required);
+                    String jsonType = javaTypeToJsonType(param.getType());
+                    String itemsType = inferItemsType(genericTypes[i], param.getType());
+                    if (itemsType != null) {
+                        builder.addProperty(paramName, jsonType, paramDesc, required, itemsType);
+                    } else {
+                        builder.addProperty(paramName, jsonType, paramDesc, required);
+                    }
                 }
                 tools.add(builder.build());
             }
@@ -126,7 +142,7 @@ public class ToolRegistry {
     }
 
     private String doExecute(ToolEntry entry, String arguments) {
-        Map<String, Object> parsedArgs = parseSimpleJson(arguments);
+        Map<String, Object> parsedArgs = parseArguments(arguments);
 
         if (entry.handler != null) {
             return entry.handler.execute(new ToolArgs(parsedArgs));
@@ -164,7 +180,36 @@ public class ToolRegistry {
         if (type == boolean.class || type == Boolean.class) {
             return "boolean";
         }
+        if (type.isArray() || List.class.isAssignableFrom(type) || Set.class.isAssignableFrom(type)) {
+            return "array";
+        }
+        if (Map.class.isAssignableFrom(type)) {
+            return "object";
+        }
         return "string";
+    }
+
+    /**
+     * 推断数组/集合参数的元素 JSON 类型（用于生成 schema 的 items）。
+     * 返回 null 表示该参数非数组/集合（无需 items）。
+     */
+    private String inferItemsType(Type genericType, Class<?> rawType) {
+        // Java 数组：元素类型 = getComponentType()
+        if (rawType.isArray()) {
+            return javaTypeToJsonType(rawType.getComponentType());
+        }
+        // 仅 List/Set 生成 items；Map 作为 object 不需要 items
+        if (List.class.isAssignableFrom(rawType) || Set.class.isAssignableFrom(rawType)) {
+            if (genericType instanceof ParameterizedType) {
+                Type[] args = ((ParameterizedType) genericType).getActualTypeArguments();
+                if (args.length > 0 && args[0] instanceof Class) {
+                    return javaTypeToJsonType((Class<?>) args[0]);
+                }
+            }
+            // raw List/Set 无泛型 → 兜底 string
+            return "string";
+        }
+        return null;
     }
 
     private Object convertType(Object value, Class<?> targetType) {
@@ -174,51 +219,57 @@ public class ToolRegistry {
         if (targetType == long.class || targetType == Long.class) return Long.parseLong(value.toString());
         if (targetType == double.class || targetType == Double.class) return Double.parseDouble(value.toString());
         if (targetType == boolean.class || targetType == Boolean.class) return Boolean.parseBoolean(value.toString());
+        if (targetType.isArray()) {
+            List<?> list = coerceToList(value);
+            Object array = Array.newInstance(targetType.getComponentType(), list.size());
+            for (int i = 0; i < list.size(); i++) {
+                Array.set(array, i, convertType(list.get(i), targetType.getComponentType()));
+            }
+            return array;
+        }
+        if (List.class.isAssignableFrom(targetType)) return coerceToList(value);
+        if (Set.class.isAssignableFrom(targetType)) return new LinkedHashSet<>(coerceToList(value));
+        if (Map.class.isAssignableFrom(targetType) && value instanceof Map) return value;
         return value;
     }
 
     /**
-     * 简易 JSON 解析，提取 key-value 为 Map
+     * 将值强制转为 List：已是 List 直接返回；Java 数组逐元素拷贝；否则 fail-fast。
      */
-    private Map<String, Object> parseSimpleJson(String json) {
-        Map<String, Object> map = new HashMap<>();
-        if (json == null || json.isBlank()) return map;
-
-        json = json.trim();
-        if (json.startsWith("{")) json = json.substring(1);
-        if (json.endsWith("}")) json = json.substring(0, json.length() - 1);
-
-        int i = 0;
-        while (i < json.length()) {
-            while (i < json.length() && (json.charAt(i) == ' ' || json.charAt(i) == ',' || json.charAt(i) == '\n')) i++;
-            if (i >= json.length()) break;
-
-            if (json.charAt(i) != '"') { i++; continue; }
-            int keyStart = ++i;
-            while (i < json.length() && json.charAt(i) != '"') i++;
-            String key = json.substring(keyStart, i);
-            i++;
-
-            while (i < json.length() && json.charAt(i) != ':') i++;
-            i++;
-            while (i < json.length() && json.charAt(i) == ' ') i++;
-
-            if (i < json.length() && json.charAt(i) == '"') {
-                int valStart = ++i;
-                while (i < json.length() && json.charAt(i) != '"') i++;
-                map.put(key, json.substring(valStart, i));
-                i++;
-            } else {
-                int valStart = i;
-                while (i < json.length() && json.charAt(i) != ',' && json.charAt(i) != '}') i++;
-                String val = json.substring(valStart, i).trim();
-                if (val.equals("true")) map.put(key, true);
-                else if (val.equals("false")) map.put(key, false);
-                else if (val.equals("null")) map.put(key, null);
-                else map.put(key, val);
-            }
+    private List<?> coerceToList(Object value) {
+        if (value instanceof List) {
+            return (List<?>) value;
         }
-        return map;
+        if (value.getClass().isArray()) {
+            int len = Array.getLength(value);
+            List<Object> list = new ArrayList<>(len);
+            for (int i = 0; i < len; i++) {
+                list.add(Array.get(value, i));
+            }
+            return list;
+        }
+        throw new IllegalArgumentException("无法转换为 List: " + value.getClass());
+    }
+
+    /**
+     * 解析工具参数 JSON（支持标量、字符串、布尔、null、数组、对象及嵌套），
+     * 返回 key-value 的 Map。解析失败 fail-fast 抛出 IllegalArgumentException。
+     */
+    private Map<String, Object> parseArguments(String json) {
+        if (json == null || json.isBlank()) {
+            return new HashMap<>();
+        }
+        try {
+            Object parsed = MAPPER.readValue(json.trim(), Object.class);
+            if (parsed instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> map = (Map<String, Object>) parsed;
+                return map;
+            }
+            throw new IllegalArgumentException("工具参数必须是 JSON 对象: " + json);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("工具参数 JSON 解析失败: " + json, e);
+        }
     }
 
     // ---- 内部结构 ----
