@@ -190,6 +190,36 @@ List<Tool> tools = registry.getTools();
 // tools 包含 search_flights 和 book_hotel 两个工具
 ```
 
+### 数组与对象参数
+
+工具方法支持数组（`List` / `Set` / Java 数组）和对象（`Map`）参数。框架会从方法签名的泛型自动推断数组元素类型，生成对应的 JSON Schema `items`，无需额外注解：
+
+```java
+static class DataTool {
+
+    @ToolDef(name = "sum_points", description = "对一组数值求和")
+    public String sumPoints(
+            @ToolParam(name = "points", description = "数值列表") List<Integer> points) {
+        int sum = points.stream().mapToInt(Integer::intValue).sum();
+        return "总和: " + sum;
+    }
+
+    @ToolDef(name = "lookup", description = "按对象查找")
+    public String lookup(
+            @ToolParam(name = "data", description = "查询对象") Map<String, Object> data) {
+        return "收到对象: " + data;
+    }
+}
+```
+
+`sumPoints` 生成的参数 Schema 为：
+
+```json
+{"type": "array", "items": {"type": "number"}}
+```
+
+LLM 据此返回数组 `{"points": [12, 34]}`，框架解析为 `List<Integer>` 后直接传入方法，无需手动转换。raw type `List`（无泛型）会兜底推断元素为 `string`。
+
 ## 扫描机制
 
 `ToolRegistry.scan(Object target)` 的工作流程：
@@ -200,6 +230,8 @@ List<Tool> tools = registry.getTools();
 4. 自动将 Java 类型映射为 JSON Schema 类型：
    - `int` / `Integer` / `long` / `Long` / `double` / `Double` / `float` / `Float` -> `number`
    - `boolean` / `Boolean` -> `boolean`
+   - `List` / `Set` / Java 数组（如 `List<Integer>`、`String[]`） -> `array`（自动从泛型推断 `items` 元素类型，如 `{"type":"array","items":{"type":"number"}}`）
+   - `Map` -> `object`
    - 其他类型 -> `string`
 5. 将工具注册到 `ToolRegistry` 中
 

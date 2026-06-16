@@ -58,7 +58,7 @@ registry.register("tool_name", "工具描述")
 | 参数 | 类型 | 说明 |
 |------|------|------|
 | `name` | `String` | 参数名称 |
-| `type` | `String` | JSON Schema 类型：`"string"`、`"number"`、`"boolean"` |
+| `type` | `String` | JSON Schema 类型：`"string"`、`"number"`、`"boolean"`、`"array"`、`"object"` |
 | `description` | `String` | 参数描述 |
 | `required` | `boolean` | 是否必填 |
 

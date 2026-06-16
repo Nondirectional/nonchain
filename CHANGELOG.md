@@ -4,6 +4,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.8.2] - 2026-06-16
+
+### 修复
+
+- 工具参数 JSON 解析支持数组/对象，修复 `ClassCastException`
+  - 用 Jackson `ObjectMapper` 替换手写 `parseSimpleJson`（原解析器不识别 `[`/`{` 嵌套、不支持字符串转义与值内逗号），使 schema 声明的 `array`/`object` 类型能被正确解析为 `List`/`Map`
+  - `ToolRegistry.javaTypeToJsonType` 增加 `array`/`object` 类型判断；新增 `inferItemsType` 从方法签名泛型自动推断数组元素类型（零 `@ToolParam` API 变更）
+  - `ToolRegistry.convertType` 适配 `List`/`Set`/Java 数组/`Map` 目标类型（数组元素递归装箱）
+  - `Tool` 的 `Property` 增加 `items` 字段，`Builder` 新增带 `itemsType` 的 `addProperty` 重载，`toFunctionDefinition` 在 `type=array` 时输出 `items`（现有标量行为不变）
+  - 新增 `ToolRegistryTest`（14 个用例）覆盖数组/对象/转义/标量回归/非法 JSON/注解 array schema/注解容器端到端
+
 ## [0.8.1] - 2026-06-11
 
 ### 修复

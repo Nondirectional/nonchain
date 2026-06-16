@@ -299,28 +299,34 @@ System.out.println("已注册 " + tools.size() + " 个工具");
 | `double` / `Double` | `number` |
 | `float` / `Float` | `number` |
 | `boolean` / `Boolean` | `boolean` |
+| `List` / `Set` / Java 数组（`int[]`、`String[]` 等） | `array`（自动从泛型推断 `items` 元素类型） |
+| `Map` | `object` |
 | `String` / 其他 | `string` |
 
 在流式 API 模式下，通过 `param()` 方法的 `type` 参数手动指定类型。
 
 ## JSON 参数解析
 
-`ToolRegistry.execute()` 接收的 `arguments` 是一个 JSON 字符串。框架内置了简易 JSON 解析器，支持以下类型：
+`ToolRegistry.execute()` 接收的 `arguments` 是一个 JSON 字符串。框架基于 Jackson 解析参数，支持以下类型：
 
 - 字符串值：`"hello"` -> `String`
-- 数字值：`42`, `3.14` -> `Number`
+- 数字值：`42`, `3.14` -> `Number`（`Integer` / `Double`）
 - 布尔值：`true`, `false` -> `Boolean`
 - 空值：`null` -> `null`
+- 数组：`[12, 34]` -> `List`
+- 对象：`{"k": "v"}` -> `Map`（支持嵌套）
 
 ```java
 // JSON 参数示例
-String json = "{\"city\":\"北京\",\"temp\":25,\"rainy\":false}";
+String json = "{\"city\":\"北京\",\"points\":[12,34],\"config\":{\"k\":\"v\"}}";
 
 // 解析后
-// city  -> "北京"  (String)
-// temp  -> 25      (Number)
-// rainy -> false   (Boolean)
+// city   -> "北京"        (String)
+// points -> [12, 34]      (List<Integer>)
+// config -> {k=v}         (Map)
 ```
+
+非法 JSON 或顶层非对象（如 `[1,2]`）会抛出含中文描述的 `IllegalArgumentException`。
 
 ## 错误处理
 
