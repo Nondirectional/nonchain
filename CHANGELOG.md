@@ -4,6 +4,21 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.8.3] - 2026-06-16
+
+### 新增
+
+- `PdfDocumentReader` 支持自定义 OCR 渲染 DPI
+  - 新增构造函数 `PdfDocumentReader(OcrEngine, int scanThreshold, int renderDpi)`，可控制扫描件每页渲染为图片的分辨率（默认 300 DPI）
+  - DPI 越高越清晰但渲染越慢，适用于扫描质量差或小字号场景（如调至 600）；追求速度可降低（如 150）
+  - fail-fast 校验：DPI ≤ 0 抛出 `IllegalArgumentException`（中文消息）
+  - 原有构造函数向后兼容，默认沿用 300 DPI
+
+### 文档
+
+- `docs/document/readers.md` 同步 DPI 配置说明与构造函数表格
+- `README.md` 补充 Java 版本测试说明（已在 Java 11 / 17 / 21 上测试通过）
+
 ## [0.8.2] - 2026-06-16
 
 ### 修复

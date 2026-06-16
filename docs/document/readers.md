@@ -154,6 +154,9 @@ PdfDocumentReader reader = new PdfDocumentReader(ocrEngine);
 
 // 自定义 OCR 引擎和扫描件检测阈值
 PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100);
+
+// 自定义 OCR 引擎、扫描件检测阈值和 OCR 渲染 DPI（默认 300，数值越大越清晰但越慢）
+PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100, 300);
 ```
 
 | 构造函数 | 说明 |
@@ -161,6 +164,7 @@ PdfDocumentReader reader = new PdfDocumentReader(ocrEngine, 100);
 | `PdfDocumentReader()` | 无 OCR，仅提取文本和嵌入图片 |
 | `PdfDocumentReader(OcrEngine)` | 带默认扫描件阈值（50） |
 | `PdfDocumentReader(OcrEngine, int)` | 自定义扫描件阈值 |
+| `PdfDocumentReader(OcrEngine, int, int)` | 自定义扫描件阈值和 OCR 渲染 DPI（默认 300） |
 
 ### 扫描件检测
 

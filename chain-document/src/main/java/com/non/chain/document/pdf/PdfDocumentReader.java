@@ -42,9 +42,14 @@ public class PdfDocumentReader implements DocumentReader {
      * 默认扫描件检测阈值：每页平均文本字符数低于此值视为扫描件
      */
     private static final int DEFAULT_SCAN_THRESHOLD = 50;
+    /**
+     * 默认 OCR 渲染 DPI：扫描件每页渲染为图片的分辨率
+     */
+    private static final int DEFAULT_RENDER_DPI = 300;
 
     private final OcrEngine ocrEngine;
     private final int scanThreshold;
+    private final int renderDpi;
 
     public PdfDocumentReader() {
         this(null);
@@ -55,8 +60,19 @@ public class PdfDocumentReader implements DocumentReader {
     }
 
     public PdfDocumentReader(OcrEngine ocrEngine, int scanThreshold) {
+        this(ocrEngine, scanThreshold, DEFAULT_RENDER_DPI);
+    }
+
+    /**
+     * @param renderDpi 扫描件 OCR 时每页渲染为图片的 DPI，必须为正数
+     */
+    public PdfDocumentReader(OcrEngine ocrEngine, int scanThreshold, int renderDpi) {
+        if (renderDpi <= 0) {
+            throw new IllegalArgumentException("渲染 DPI 必须为正数: " + renderDpi);
+        }
         this.ocrEngine = ocrEngine;
         this.scanThreshold = scanThreshold;
+        this.renderDpi = renderDpi;
     }
 
     @Override
@@ -134,7 +150,7 @@ public class PdfDocumentReader implements DocumentReader {
 
         for (int i = 0; i < pageCount; i++) {
             int pageNumber = i + 1;
-            BufferedImage pageImage = renderer.renderImageWithDPI(i, 300);
+            BufferedImage pageImage = renderer.renderImageWithDPI(i, renderDpi);
             String ocrText = ocrEngine.recognize(pageImage);
 
             if (ocrText != null && !ocrText.isBlank()) {
