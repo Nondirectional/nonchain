@@ -2,6 +2,7 @@ package com.non.chain.memory;
 
 import com.non.chain.Message;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -72,7 +73,7 @@ public class TokenWindowChatMemory implements ChatMemory {
     }
 
     /**
-     * 裁剪消息列表直到总 token 数 <= maxTokens。
+     * 裁剪消息列表直到 LLM 可见消息的总 token 数 <= maxTokens。
      *
      * <p>规则：</p>
      * <ol>
@@ -80,10 +81,12 @@ public class TokenWindowChatMemory implements ChatMemory {
      *   <li>assistant 消息带 toolCalls 时，相关 tool 消息应尽量成组保留/删除，
      *       包括异常顺序下的防御式配对</li>
      *   <li>从最老的非 system 消息开始删除</li>
+     *   <li>非 LLM 可见消息（llmVisible=false）不计入 token 预算，
+     *       裁剪时跳过且原位保留 —— 不占 LLM 上下文预算，也不破坏 tool 配对保护</li>
      * </ol>
      */
     void trim(List<Message> messages) {
-        while (tokenizer.estimateTokenCount(messages) > maxTokens) {
+        while (tokenizer.estimateTokenCount(llmVisibleMessages(messages)) > maxTokens) {
             int deleteIndex = findFirstDeletableIndex(messages);
             if (deleteIndex < 0) {
                 break;
@@ -97,6 +100,19 @@ public class TokenWindowChatMemory implements ChatMemory {
                 break;
             }
         }
+    }
+
+    /**
+     * 构造 LLM 可见消息子列表（非 LLM 可见消息不计入 token 预算）。
+     */
+    private List<Message> llmVisibleMessages(List<Message> messages) {
+        List<Message> visible = new ArrayList<>(messages.size());
+        for (Message m : messages) {
+            if (m.llmVisible()) {
+                visible.add(m);
+            }
+        }
+        return visible;
     }
 
     private int findFirstDeletableIndex(List<Message> messages) {

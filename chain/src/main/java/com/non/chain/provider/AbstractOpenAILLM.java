@@ -188,7 +188,9 @@ public abstract class AbstractOpenAILLM implements LLM {
             builder.maxCompletionTokens(maxCompletionTokens);
         }
 
-        for (Message msg : messages) {
+        // LLM 边界过滤：应用层消息（llmVisible=false，如 UI 状态/通知）不进 provider 请求。
+        // 静默剥离，遵循项目无日志框架约定；下方 default:throw 是唯一 fail-safe 信号。
+        for (Message msg : filterLlmVisible(messages)) {
             switch (msg.role()) {
                 case "system":
                     builder.addSystemMessage(msg.content());
@@ -238,6 +240,21 @@ public abstract class AbstractOpenAILLM implements LLM {
             }
         }
         return builder;
+    }
+
+    /**
+     * LLM 边界过滤：剥离 llmVisible=false 的应用层消息，只保留进 LLM 上下文的消息。
+     *
+     * <p>package-private 以便单测覆盖过滤语义，是本任务 R2 的唯一可测入口。</p>
+     */
+    static List<Message> filterLlmVisible(List<Message> messages) {
+        List<Message> visible = new ArrayList<>(messages.size());
+        for (Message msg : messages) {
+            if (msg.llmVisible()) {
+                visible.add(msg);
+            }
+        }
+        return visible;
     }
 
     private ChatCompletionContentPart toSdkContentPart(ContentPart part) {

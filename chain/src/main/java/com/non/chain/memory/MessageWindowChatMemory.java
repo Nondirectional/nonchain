@@ -78,10 +78,12 @@ public class MessageWindowChatMemory implements ChatMemory {
      *   <li>assistant 消息带 toolCalls 时，相关 tool 消息应尽量成组保留/删除，
      *       包括异常顺序下的防御式配对</li>
      *   <li>从最老的非 system 消息开始删除</li>
+     *   <li>非 LLM 可见消息（llmVisible=false，如 UI 状态）不计入窗口预算，
+     *       裁剪时跳过且原位保留 —— 不占 LLM 上下文预算，也不破坏 tool 配对保护</li>
      * </ol>
      */
     void trim(List<Message> messages) {
-        while (messages.size() > maxMessages) {
+        while (countLlmVisible(messages) > maxMessages) {
             int deleteIndex = findFirstDeletableIndex(messages);
             if (deleteIndex < 0) {
                 break;
@@ -92,6 +94,19 @@ public class MessageWindowChatMemory implements ChatMemory {
                 messages.remove(deleteIndex);
             }
         }
+    }
+
+    /**
+     * 统计 LLM 可见消息数量（非 LLM 可见消息不占窗口预算）。
+     */
+    private int countLlmVisible(List<Message> messages) {
+        int count = 0;
+        for (Message m : messages) {
+            if (m.llmVisible()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     /**

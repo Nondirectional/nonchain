@@ -234,4 +234,32 @@ public class TokenWindowChatMemoryTest {
                     "tool".equals(msg.role()) && "call-unknown".equals(msg.toolCallId()));
         }
     }
+
+    // ---- 应用层消息分层（R4：非 LLM 消息不计入 token 预算）----
+
+    @Test
+    public void testNoteDoesNotConsumeTokenBudget() {
+        // maxTokens 极小：只够容纳少量 LLM 可见消息；note 不计入预算，应原位保留
+        ChatMemory memory = TokenWindowChatMemory.builder()
+                .tokenizer(JtokkitTokenizer.defaults())
+                .maxTokens(40)
+                .conversationId("test-note-token-budget")
+                .build();
+
+        memory.add(Message.user("问题1问题1问题1"));
+        memory.add(Message.note("status", "正在思考的处理过程"));  // 不计入 token 预算
+        memory.add(Message.assistant("回答1回答1回答1"));
+        memory.add(Message.user("问题2问题2问题2"));
+
+        List<Message> messages = memory.messages();
+        // note 必须保留
+        assertTrue("note 必须原位保留", messages.stream().anyMatch(m -> "note".equals(m.role())));
+        // LLM 可见子序列的 token 数必须 <= maxTokens
+        Tokenizer tokenizer = JtokkitTokenizer.defaults();
+        int llmTokenCount = tokenizer.estimateTokenCount(messages.stream()
+                .filter(Message::llmVisible)
+                .collect(java.util.stream.Collectors.toList()));
+        assertTrue("LLM 可见消息 token 数应 <= maxTokens，实际 " + llmTokenCount,
+                llmTokenCount <= 40);
+    }
 }

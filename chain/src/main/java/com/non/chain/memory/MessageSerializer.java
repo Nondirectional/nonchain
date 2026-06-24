@@ -61,6 +61,10 @@ public class MessageSerializer {
                     }
                 }
             }
+            node.put("llmVisible", message.llmVisible());
+            if (message.kind() != null) {
+                node.put("kind", message.kind());
+            }
             return MAPPER.writeValueAsString(node);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("消息序列化失败", e);
@@ -104,7 +108,11 @@ public class MessageSerializer {
                 }
             }
 
-            return Message.of(role, content, contentParts, toolCallId, toolCalls);
+            // 应用层消息标记：旧数据不含 llmVisible，默认 true（向后兼容）
+            boolean llmVisible = node.has("llmVisible") ? node.get("llmVisible").asBoolean() : true;
+            String kind = node.has("kind") ? node.get("kind").asText() : null;
+
+            return Message.of(role, content, contentParts, toolCallId, toolCalls, llmVisible, kind);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("消息反序列化失败", e);
         }

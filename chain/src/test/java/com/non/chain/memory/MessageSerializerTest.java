@@ -129,4 +129,52 @@ public class MessageSerializerTest {
         assertNotNull(restored.contentParts());
         assertEquals(2, restored.contentParts().size());
     }
+
+    // ---- 应用层消息分层（R3 持久化往返）----
+
+    @Test
+    public void testSerializeNoteIncludesLlmVisibleAndKind() {
+        Message msg = Message.note("status", "已读取文件 X");
+        String json = MessageSerializer.serialize(msg);
+        assertTrue(json.contains("\"role\":\"note\""));
+        assertTrue(json.contains("\"llmVisible\":false"));
+        assertTrue(json.contains("\"kind\":\"status\""));
+    }
+
+    @Test
+    public void testSerializeLlmVisibleMessageHasTrueFlag() {
+        // 普通 LLM 可见消息序列化时总写 llmVisible=true
+        String json = MessageSerializer.serialize(Message.user("你好"));
+        assertTrue(json.contains("\"llmVisible\":true"));
+        assertFalse("kind=null 不应写入 kind 字段", json.contains("\"kind\""));
+    }
+
+    @Test
+    public void testRoundTripNotePreservesAllFields() {
+        Message original = Message.note("ui", "工具审核中");
+        String json = MessageSerializer.serialize(original);
+        Message restored = MessageSerializer.deserialize(json);
+        assertEquals("note", restored.role());
+        assertEquals("工具审核中", restored.content());
+        assertFalse("llmVisible 必须保留为 false", restored.llmVisible());
+        assertEquals("ui", restored.kind());
+    }
+
+    @Test
+    public void testDeserializeLegacyJsonDefaultsToLlmVisible() {
+        // 旧数据不含 llmVisible/kind 字段，反序列化默认 llmVisible=true, kind=null
+        String legacyJson = "{\"role\":\"user\",\"content\":\"旧消息\"}";
+        Message restored = MessageSerializer.deserialize(legacyJson);
+        assertTrue("旧数据应默认 llmVisible=true", restored.llmVisible());
+        assertNull("旧数据 kind 应为 null", restored.kind());
+    }
+
+    @Test
+    public void testRoundTripRegularMessagePreservesLlmVisibleTrue() {
+        Message original = Message.assistant("普通回复");
+        String json = MessageSerializer.serialize(original);
+        Message restored = MessageSerializer.deserialize(json);
+        assertTrue(restored.llmVisible());
+        assertNull(restored.kind());
+    }
 }

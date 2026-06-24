@@ -10,12 +10,23 @@ final class ChatMemoryTrimSupport {
     private ChatMemoryTrimSupport() {
     }
 
+    /**
+     * 找到第一个可删除的消息索引：跳过索引 0 的 system 消息，跳过非 LLM 可见消息
+     * （llmVisible=false 的应用层消息不占预算、原位保留、不参与删除）。
+     *
+     * @return 首个可删 LLM 消息索引；无可删（仅剩 system / 仅剩非 LLM 消息）时返回 -1
+     */
     static int findFirstDeletableIndex(List<Message> messages) {
         int start = isSystemMessage(messages, 0) ? 1 : 0;
-        if (start >= messages.size()) {
-            return -1;
+        for (int i = start; i < messages.size(); i++) {
+            Message current = messages.get(i);
+            if (!current.llmVisible()) {
+                // 应用层消息：原位保留，跳过
+                continue;
+            }
+            return i;
         }
-        return start;
+        return -1;
     }
 
     static int countMessageGroup(List<Message> messages, int index) {

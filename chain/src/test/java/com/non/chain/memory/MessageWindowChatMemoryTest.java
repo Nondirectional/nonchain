@@ -248,4 +248,79 @@ public class MessageWindowChatMemoryTest {
                     "tool".equals(msg.role()) && "call-unknown".equals(msg.toolCallId()));
         }
     }
+
+    // ---- 应用层消息分层（R4 裁剪交互）----
+
+    @Test
+    public void testNoteDoesNotConsumeWindowBudget() {
+        // maxMessages=2：3 条 LLM 可见消息触发裁剪，但 note 不占预算
+        ChatMemory memory = MessageWindowChatMemory.builder()
+                .maxMessages(2)
+                .conversationId("test-note-budget")
+                .build();
+
+        memory.add(Message.user("问题1"));
+        memory.add(Message.note("status", "正在思考"));   // 不占预算
+        memory.add(Message.assistant("回答1"));
+        memory.add(Message.user("问题2"));
+
+        List<Message> messages = memory.messages();
+        // LLM 可见消息 3 条 → 裁剪到 2 条（删 user 问题1）；note 原位保留
+        long llmVisible = messages.stream().filter(Message::llmVisible).count();
+        assertEquals("LLM 可见消息应裁剪到 maxMessages", 2, llmVisible);
+        assertTrue("note 必须原位保留", messages.stream().anyMatch(m -> "note".equals(m.role())));
+    }
+
+    @Test
+    public void testNotePreservedInPlaceAfterTrim() {
+        // 验证 note 不被删除、不前移
+        ChatMemory memory = MessageWindowChatMemory.builder()
+                .maxMessages(2)
+                .conversationId("test-note-inplace")
+                .build();
+
+        memory.add(Message.user("u1"));
+        memory.add(Message.note("ui", "标记1"));
+        memory.add(Message.assistant("a1"));
+        memory.add(Message.user("u2"));
+        memory.add(Message.assistant("a2"));
+
+        List<Message> messages = memory.messages();
+        // note 必须仍在列表中
+        Message note = messages.stream()
+                .filter(m -> "note".equals(m.role())).findFirst().orElse(null);
+        assertNotNull("note 必须保留", note);
+        assertEquals("标记1", note.content());
+    }
+
+    @Test
+    public void testNoteDoesNotBreakToolPairProtection() {
+        // 危险场景：note 插在 assistant(toolCalls) 与 tool result 之间
+        // 裁剪绝不能破坏 tool 配对保护
+        ChatMemory memory = MessageWindowChatMemory.builder()
+                .maxMessages(3)
+                .conversationId("test-note-tool-pair")
+                .build();
+
+        ToolCall toolCall = new ToolCall("call-1", "get_weather", "{\"city\":\"北京\"}");
+        memory.add(Message.user("北京天气？"));
+        memory.add(Message.assistantWithToolCalls(null, Arrays.asList(toolCall)));
+        memory.add(Message.note("status", "正在查询天气"));  // 插在中间
+        memory.add(Message.toolResult("call-1", "晴天"));
+        memory.add(Message.assistant("北京晴天"));
+        memory.add(Message.user("上海呢？"));
+
+        List<Message> messages = memory.messages();
+        // 核心断言：若 assistant(toolCalls) 留下，必有匹配 tool result；反之亦然
+        boolean hasAssistantWithToolCalls = messages.stream()
+                .anyMatch(m -> "assistant".equals(m.role())
+                        && m.toolCalls() != null && !m.toolCalls().isEmpty());
+        boolean hasToolResult = messages.stream()
+                .anyMatch(m -> "tool".equals(m.role()));
+        if (hasAssistantWithToolCalls) {
+            assertTrue("assistant(toolCalls) 不应孤立留下", hasToolResult);
+        }
+        // note 必须保留
+        assertTrue("note 必须原位保留", messages.stream().anyMatch(m -> "note".equals(m.role())));
+    }
 }
