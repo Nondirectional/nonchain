@@ -7,7 +7,7 @@
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，支持阿里云 DashScope、vLLM 及任何 OpenAI 兼容端点（Ollama、LiteLLM）
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
-- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出和工具并行执行
+- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行和工具拦截器（before/after，可阻止/改写工具调用）
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
@@ -154,6 +154,35 @@ Agent agent = Agent.builder(llm, registry)
 ChatResult result = agent.run("北京和上海天气怎么样？");
 System.out.println(result.content());
 ```
+
+### 工具拦截器
+
+工具拦截器（`BeforeToolCall` / `AfterToolCall`）在不修改工具实现、不继承 `Agent` 的前提下，对工具调用进行**拦截、阻止、改写**。与 `ChainCallback`（只读观察）正交——拦截器是**控制**层。
+
+- **before**：工具执行前调用，可 `block(reason)` 阻止执行（reason 回灌 LLM）；多个 before 任一 block 即短路
+- **after**：工具执行后、结果回灌 LLM 前调用，可改写 `content`（脱敏/截断）或标记 `isError`；多个 after 链式叠加
+
+```java
+Agent agent = Agent.builder(llm, registry)
+        .systemPrompt("你是查询助手")
+        // before：拦截危险关键词
+        .addBeforeToolCall(ctx -> {
+            if (ctx.arguments().contains("rm -rf")) {
+                return BeforeResult.block("危险命令禁止");
+            }
+            return BeforeResult.pass();
+        })
+        // after：对结果脱敏（手机号替换为 ***）
+        .addAfterToolCall(ctx ->
+                AfterResult.content(ctx.result().replaceAll("\\d{11}", "***********")))
+        .build();
+
+agent.run("查询用户信息");
+```
+
+典型场景：危险命令审核/确认、工具结果脱敏、超长输出截断、工具熔断（黑名单/配额）。
+
+> **注意**：拦截器异常会被包装为 `AgentException` 抛出（不静默吞，让失败可见）；而 `ChainCallback` 的异常被静默隔离（观察失败不影响主流程）。两者职责不同，可在同一 Agent 共存。
 
 ### 工作流编排
 
@@ -341,6 +370,7 @@ for (SearchResult result : response.results()) {
 | `StreamingChatExample` | 流式输出：基础流式、思考模式、工具调用 |
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
+| `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |

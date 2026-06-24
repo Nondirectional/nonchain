@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 24 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 28 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -52,7 +52,9 @@ mvn compile exec:java -pl chain-example \
 | `StructuredOutputExample` | JSON Object 结构化输出 |
 | `ImageInputExample` | 多模态图片输入 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
+| `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
+| `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 
 #### FunctionCallExample
 

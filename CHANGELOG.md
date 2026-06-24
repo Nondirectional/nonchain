@@ -4,6 +4,28 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [Unreleased]
+
+### 新增
+
+- Agent 工具拦截器（`BeforeToolCall` / `AfterToolCall`），在不继承 `Agent`、不破坏 `ChainCallback` 的前提下对工具调用进行拦截、阻止、改写
+  - `Agent.Builder` 新增 `addBeforeToolCall` / `addAfterToolCall`，可注册多个；before 任一 `block(reason)` 即短路，after 链式叠加（脱敏/截断/标 `isError`）
+  - 新增 5 个类型：`ToolCallContext`（before/after 共用上下文，after 额外携带 `result`/`isError`）、`BeforeResult`（`pass()`/`block(reason)`）、`AfterResult`（`keep()`/`content()`/`error()`/`builder()`）、`BeforeToolCall`、`AfterToolCall`（均为 `@FunctionalInterface`）
+  - 拦截器异常包装为 `AgentException` 抛出（不静默吞）；工具执行异常仍走软失败回灌 LLM（现状语义不变）
+  - 典型场景：危险命令审核、结果脱敏、超长输出截断、工具熔断
+
+### 变更
+
+- `ToolRegistry.execute` 不再触发 `ChainCallback`，callback 改由 `Agent` 编排层统一触发（每次工具调用仅触发一次）
+  - 原 `ToolRegistry` 内部的 callback 触发是死代码：全库 30+ 处均用 `new ToolRegistry()`（callback=noop），`new ToolRegistry(callback)`/`new ToolRegistry(chainContext)` 零调用方
+  - 删除 `ToolRegistry(ChainCallback)`、`ToolRegistry(ChainContext)` 两个零调用构造器及 `callback` 字段
+  - `ToolRegistry` 回归纯执行器职责；`Agent.safeExecute` 重构为 callback → before → 执行 → after 的编排链
+
+### 文档
+
+- `README.md` 新增「工具拦截器」小节、特性列表与示例表补充
+- `.trellis/spec/backend/tool-function-calling.md` 新增「Tool Interceptors vs Callback (control vs observation)」章节，固化拦截器（控制，异常传播）与 callback（观察，异常隔离）的职责边界
+
 ## [0.8.4] - 2026-06-16
 
 ### 新增
