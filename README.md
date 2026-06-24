@@ -8,6 +8,7 @@
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
 - **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行和工具拦截器（before/after，可阻止/改写工具调用）
+- **应用层消息分层** — `Message.note()` 产生 UI-only 状态消息（"正在思考"、"已读取文件"），进 transcript 供 UI 重放，在 LLM 边界被剥离不污染上下文
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
@@ -183,6 +184,30 @@ agent.run("查询用户信息");
 典型场景：危险命令审核/确认、工具结果脱敏、超长输出截断、工具熔断（黑名单/配额）。
 
 > **注意**：拦截器异常会被包装为 `AgentException` 抛出（不静默吞，让失败可见）；而 `ChainCallback` 的异常被静默隔离（观察失败不影响主流程）。两者职责不同，可在同一 Agent 共存。
+
+### 应用层消息与 LLM 消息分层
+
+应用层消息（`Message.note(kind, content)`）记录 UI-only 状态进对话 transcript，供 UI 重放历史，但**不进入 LLM 上下文**——在 LLM 调用边界被自动剥离。
+
+- **产生**：`Message.note("status", "已读取文件 X")` 产出 `role="note"`、`llmVisible=false` 的应用层消息，`kind` 为应用自定义语义标签（如 `status`/`ui`/`artifact`）
+- **过滤**：`llmVisible=false` 的消息在 provider 请求构建时被单点剥离，所有 LLM provider 共用
+- **持久化**：随 `ChatMemory` 正常存取（`MessageSerializer` 往返标记），UI 可从 transcript 重建含应用层消息的完整历史
+- **裁剪**：应用层消息不计入窗口/token 预算、原位保留，不破坏 tool 消息配对保护
+
+```java
+// 应用层消息：进 transcript，不进 LLM
+Message note = Message.note("status", "正在读取文件 config.json");
+
+List<Message> messages = new ArrayList<>();
+messages.add(Message.user("读取配置文件"));
+messages.add(note);                       // UI 会看到，LLM 看不到
+messages.add(Message.assistant("..."));
+
+// LLM 边界自动过滤：provider 请求只含 user/assistant，不含 note
+ChatResult result = llm.chat(messages, OutputFormat.TEXT);
+```
+
+典型场景：UI 状态条（"正在思考"、"工具审核中"）、artifact 记录、通知重放。现有 `Message.user/assistant/...` 工厂产出的消息默认 `llmVisible=true`，行为与改动前完全一致。
 
 ### 工作流编排
 
@@ -371,6 +396,7 @@ for (SearchResult result : response.results()) {
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
+| `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |

@@ -8,6 +8,12 @@
 
 ### 新增
 
+- 应用层消息与 LLM 消息分层（`Message.llmVisible` / `kind`），允许应用把 UI-only 状态（"正在思考"、"已读取文件"、"工具审核中"）记录进对话 transcript 供 UI 重放，同时保证这些消息不进 LLM 上下文
+  - `Message` 新增 `llmVisible`（默认 `true`）与 `kind`（可选语义标签，如 `status`/`ui`）字段，及 `Message.note(kind, content)` 工厂（产出 `role="note"`、`llmVisible=false` 的应用层消息）
+  - `AbstractOpenAILLM` 边界单点过滤：`llmVisible=false` 的消息在送入 provider 请求前被剥离（静默，遵循项目无日志框架约定），所有 provider（Dashscope/OpenAICompatible/VLLM）共用，`default:throw` 保留作 fail-safe
+  - 持久化零 DDL：`MessageSerializer` 往返 `llmVisible`/`kind`，旧 `content_json` 不含该字段时默认 `llmVisible=true`，三种 store（InMemory/MySQL/Postgres）自动继承
+  - 裁剪策略：非 LLM 消息不计入窗口/token 预算、原位保留，不破坏现有 tool 消息配对保护
+  - 现有 `Message` API 零破坏（旧工厂与 5 参 `of(...)` 全部保留，默认产出 `llmVisible=true`）
 - Agent 工具拦截器（`BeforeToolCall` / `AfterToolCall`），在不继承 `Agent`、不破坏 `ChainCallback` 的前提下对工具调用进行拦截、阻止、改写
   - `Agent.Builder` 新增 `addBeforeToolCall` / `addAfterToolCall`，可注册多个；before 任一 `block(reason)` 即短路，after 链式叠加（脱敏/截断/标 `isError`）
   - 新增 5 个类型：`ToolCallContext`（before/after 共用上下文，after 额外携带 `result`/`isError`）、`BeforeResult`（`pass()`/`block(reason)`）、`AfterResult`（`keep()`/`content()`/`error()`/`builder()`）、`BeforeToolCall`、`AfterToolCall`（均为 `@FunctionalInterface`）
@@ -23,6 +29,7 @@
 
 ### 文档
 
+- `README.md` 新增「应用层消息与 LLM 消息分层」小节、特性列表与示例表补充
 - `README.md` 新增「工具拦截器」小节、特性列表与示例表补充
 - `.trellis/spec/backend/tool-function-calling.md` 新增「Tool Interceptors vs Callback (control vs observation)」章节，固化拦截器（控制，异常传播）与 callback（观察，异常隔离）的职责边界
 

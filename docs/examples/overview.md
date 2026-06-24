@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 28 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 29 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -55,6 +55,7 @@ mvn compile exec:java -pl chain-example \
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
+| `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 
 #### FunctionCallExample
 
@@ -112,6 +113,15 @@ mvn compile exec:java -pl chain-example \
 
 前置条件：
 - vLLM 服务运行中，且部署了视觉模型
+
+#### MessageLayeringExample
+
+演示应用层消息与 LLM 消息分层：用 `Message.note(kind, content)` 产生 UI-only 状态消息（如"正在思考"、"已读取文件"），它进对话 transcript 供 UI 重放，但在 LLM 边界被剥离，不污染 LLM 上下文。本示例纯本地运行，不需要 API 密钥，依次演示产生应用层消息、序列化往返、裁剪交互（不占预算/原位保留）、LLM 边界过滤四层语义。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.MessageLayeringExample"
+```
 
 ### 工作流
 
