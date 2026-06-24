@@ -1,14 +1,6 @@
 package com.non.chain.tool;
 
 
-import com.non.chain.callback.ChainCallback;
-import com.non.chain.callback.ChainCallbackUtil;
-import com.non.chain.callback.ChainContext;
-import com.non.chain.callback.ChainTrace;
-import com.non.chain.callback.event.ToolCompleteEvent;
-import com.non.chain.callback.event.ToolErrorEvent;
-import com.non.chain.callback.event.ToolStartEvent;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -28,18 +20,8 @@ public class ToolRegistry {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final Map<String, ToolEntry> entries = new ConcurrentHashMap<>();
-    private final ChainCallback callback;
 
     public ToolRegistry() {
-        this.callback = ChainCallbackUtil.noop();
-    }
-
-    public ToolRegistry(ChainCallback callback) {
-        this.callback = callback != null ? callback : ChainCallbackUtil.noop();
-    }
-
-    public ToolRegistry(ChainContext chainContext) {
-        this.callback = chainContext != null ? chainContext.callback() : ChainCallbackUtil.noop();
     }
 
     /**
@@ -112,7 +94,7 @@ public class ToolRegistry {
     }
 
     /**
-     * 执行工具调用
+     * 执行工具调用（纯执行，不触发 callback——callback 由 Agent 编排层统一管理）。
      *
      * @param name      工具名称
      * @param arguments JSON 格式的参数字符串
@@ -123,22 +105,7 @@ public class ToolRegistry {
         if (entry == null) {
             throw new IllegalArgumentException("未注册的工具: " + name);
         }
-
-        String traceId = ChainTrace.get();
-        ToolCall toolCall = new ToolCall(null, name, arguments);
-        callback.onToolStart(new ToolStartEvent(traceId, toolCall));
-
-        long start = System.currentTimeMillis();
-        try {
-            String result = doExecute(entry, arguments);
-            long latencyMs = System.currentTimeMillis() - start;
-            callback.onToolComplete(new ToolCompleteEvent(traceId, null, name, result, latencyMs));
-            return result;
-        } catch (Exception e) {
-            long latencyMs = System.currentTimeMillis() - start;
-            callback.onToolError(new ToolErrorEvent(traceId, null, name, arguments, e, latencyMs));
-            throw e;
-        }
+        return doExecute(entry, arguments);
     }
 
     private String doExecute(ToolEntry entry, String arguments) {

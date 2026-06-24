@@ -21,6 +21,7 @@ import com.non.chain.tool.ToolCall;
 import com.non.chain.tool.ToolRegistry;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -55,6 +56,8 @@ public class Agent {
     private final ChainCallback callback;
     private final ChatMemory memory;
     private final Executor executor;
+    private final List<BeforeToolCall> beforeInterceptors;
+    private final List<AfterToolCall> afterInterceptors;
 
     private Agent(Builder builder) {
         this.llm = builder.llm;
@@ -64,6 +67,8 @@ public class Agent {
         this.callback = builder.callback;
         this.memory = builder.memory;
         this.executor = builder.executor;
+        this.beforeInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.beforeInterceptors));
+        this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -217,6 +222,7 @@ public class Agent {
 
             List<ToolCall> toolCalls = result.toolCalls();
             boolean parallel = toolCalls.size() > 1 && executor != null;
+            final Message assistantMessage = result.toMessage();
 
             if (parallel) {
                 // 并行执行多个工具调用，按源顺序组装结果
@@ -228,7 +234,7 @@ public class Agent {
                         eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                     }
                     final int idx = i;
-                    futures[i] = CompletableFuture.supplyAsync(() -> safeExecute(tc, traceId), executor)
+                    futures[i] = CompletableFuture.supplyAsync(() -> safeExecute(tc, assistantMessage, traceId), executor)
                             .whenComplete((output, err) -> {
                                 if (eventConsumer != null) {
                                     eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(),
@@ -251,7 +257,7 @@ public class Agent {
                     if (eventConsumer != null) {
                         eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                     }
-                    String output = safeExecute(tc, traceId);
+                    String output = safeExecute(tc, assistantMessage, traceId);
                     if (eventConsumer != null) {
                         eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
                     }
@@ -268,20 +274,75 @@ public class Agent {
     }
 
     /**
-     * 安全执行工具调用，捕获异常后将错误信息传回 LLM
+     * 安全执行工具调用：callback → before 拦截 → 执行 → after 拦截。
+     *
+     * <p>callback（onToolStart/onToolComplete/onToolError）仅在此触发一次。ToolRegistry.execute
+     * 已不触发 callback（见 ToolRegistry）。before 返回 block 时跳过执行；after 可改写 content/isError。
+     * 工具执行异常软失败回灌 LLM（保持现状语义）；拦截器异常包装为 AgentException 抛出（不静默吞）。</p>
      */
-    private String safeExecute(ToolCall tc, String traceId) {
+    private String safeExecute(ToolCall tc, Message assistantMessage, String traceId) {
+        ToolCallContext ctx = new ToolCallContext(tc.id(), tc.name(), tc.arguments(), assistantMessage);
+
+        // 1. callback: onToolStart（唯一触发点）
         callback.onToolStart(new ToolStartEvent(traceId, tc));
         long start = System.currentTimeMillis();
+
         try {
-            String result = toolRegistry.execute(tc.name(), tc.arguments());
+            // 2. before 拦截器链（任一 block 即短路）
+            for (BeforeToolCall before : beforeInterceptors) {
+                BeforeResult br = before.before(ctx);
+                if (br.blocked()) {
+                    long latencyMs = System.currentTimeMillis() - start;
+                    // block 视为错误：触发 onToolError（reason 文本），无 onToolComplete
+                    callback.onToolError(new ToolErrorEvent(traceId, tc.id(), tc.name(), tc.arguments(),
+                            new RuntimeException(br.reason()), latencyMs));
+                    return br.reason();
+                }
+            }
+
+            // 3. 实际执行（ToolRegistry.execute 已不触发 callback）
+            String result;
+            boolean isError = false;
+            try {
+                result = toolRegistry.execute(tc.name(), tc.arguments());
+            } catch (Exception execEx) {
+                // 工具执行错误：软失败（现状语义），仍允许 after 拦截器处理错误结果
+                result = "工具执行失败: " + execEx.getMessage();
+                isError = true;
+            }
+
+            // 4. after 拦截器链（链式：前一个输出作后一个输入）
+            for (AfterToolCall after : afterInterceptors) {
+                AfterResult ar = after.after(new ToolCallContext(tc.id(), tc.name(), tc.arguments(),
+                        assistantMessage, result, isError));
+                if (ar.modified()) {
+                    if (ar.content() != null) {
+                        result = ar.content();
+                    }
+                    if (ar.isError() != null) {
+                        isError = ar.isError();
+                    }
+                }
+            }
+
+            // 5. callback: onToolComplete 或 onToolError（唯一触发点）
             long latencyMs = System.currentTimeMillis() - start;
-            callback.onToolComplete(new ToolCompleteEvent(traceId, tc.id(), tc.name(), result, latencyMs));
+            if (isError) {
+                callback.onToolError(new ToolErrorEvent(traceId, tc.id(), tc.name(), tc.arguments(),
+                        new RuntimeException(result), latencyMs));
+            } else {
+                callback.onToolComplete(new ToolCompleteEvent(traceId, tc.id(), tc.name(), result, latencyMs));
+            }
             return result;
+
+        } catch (AgentException ae) {
+            // 拦截器异常：上抛（不静默吞）。callback.onToolError 已在包装前的内层保证触发。
+            throw ae;
         } catch (Exception e) {
+            // 拦截器异常包装为 AgentException
             long latencyMs = System.currentTimeMillis() - start;
             callback.onToolError(new ToolErrorEvent(traceId, tc.id(), tc.name(), tc.arguments(), e, latencyMs));
-            return "工具执行失败: " + e.getMessage();
+            throw new AgentException("工具拦截器执行失败: " + tc.name(), e);
         }
     }
 
@@ -294,6 +355,8 @@ public class Agent {
         private ChainCallback callback;
         private ChatMemory memory;
         private Executor executor = ForkJoinPool.commonPool();
+        private final List<BeforeToolCall> beforeInterceptors = new ArrayList<>();
+        private final List<AfterToolCall> afterInterceptors = new ArrayList<>();
 
         private Builder(LLM llm, ToolRegistry toolRegistry) {
             this.llm = llm;
@@ -376,6 +439,41 @@ public class Agent {
          */
         public Builder executor(Executor executor) {
             this.executor = executor;
+            return this;
+        }
+
+        /**
+         * 添加 before 工具拦截器，在工具实际执行前调用，可阻止执行。
+         * 多个拦截器按添加顺序串行调用，任一返回 block 即短路。
+         *
+         * <pre>{@code
+         * .addBeforeToolCall(ctx -> {
+         *     if (ctx.arguments().contains("rm -rf")) {
+         *         return BeforeResult.block("危险命令禁止");
+         *     }
+         *     return BeforeResult.pass();
+         * })
+         * }</pre>
+         */
+        public Builder addBeforeToolCall(BeforeToolCall interceptor) {
+            if (interceptor != null) {
+                this.beforeInterceptors.add(interceptor);
+            }
+            return this;
+        }
+
+        /**
+         * 添加 after 工具拦截器，在工具执行完成后、结果回灌 LLM 前调用，可改写结果。
+         * 多个拦截器按添加顺序链式调用（前一个输出作后一个输入）。
+         *
+         * <pre>{@code
+         * .addAfterToolCall(ctx -> AfterResult.content(maskSecrets(ctx.result())))
+         * }</pre>
+         */
+        public Builder addAfterToolCall(AfterToolCall interceptor) {
+            if (interceptor != null) {
+                this.afterInterceptors.add(interceptor);
+            }
             return this;
         }
 
