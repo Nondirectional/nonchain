@@ -121,6 +121,7 @@ Framework 层是 nonchain 的核心，提供了三大基础能力：工具管理
 - `ToolCall` 值对象表示 LLM 返回的工具调用指令
 - `ToolHandler` 函数式接口定义工具的执行逻辑
 - `ToolArgs` 封装工具调用的参数，提供类型安全的参数访问
+- 支持注册委派型子代理（SubAgent）：`registerSubAgent(name, description)` 声明式注册，由 `Agent` 按暴露模式（`DIRECT`/`DELEGATE`）决定如何把子代理暴露给 LLM；子代理默认无状态隔离（独立 systemPrompt/工具集/拦截器，父/子 callback 与 trace 隔离）
 
 **图工作流引擎（Graph）：**
 

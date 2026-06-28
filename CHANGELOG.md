@@ -5,6 +5,28 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 ## [Unreleased]
+## [0.9.0] - 2026-06-28
+
+### 新增
+
+- 委派型子代理（SubAgent），父 Agent 通过 tool calling 自主把子任务委派给专职子代理，子代理独立运行后把最终文本结果回传
+  - 子代理作为一等 tool 能力注册在 `ToolRegistry`，由 `Agent.Builder` 决定暴露模式，两层职责拆分：注册在 `ToolRegistry`、暴露在 `Agent.Builder`
+  - 两种暴露模式：`DIRECT`（默认，每个子代理一个独立 tool，schema 仅含 `task`）/ `DELEGATE`（显式开启，单个 `delegate_to_subagent(agentName, task)`，`agentName` 为已注册子代理名枚举）
+  - 声明式注册 Builder `registerSubAgent(name, description)`，`description`（进 LLM schema）与 `systemPrompt`（子代理角色）分开定义且均必填；可配 `toolRegistry`（默认无工具子代理）、`llm`（默认继承父 LLM）、`maxIterations`、`contextSelector`、`before/after` 拦截器
+  - 新增 4 个类型：`SubAgentExposureMode`（枚举）、`SubAgentDefinition`（不可变值对象）、`ContextSelector`（`@FunctionalInterface`，父上下文裁剪策略）、`ToolRegistry.SubAgentRegistration`（注册 Builder）
+  - 子代理默认无状态隔离：独立 systemPrompt/工具集/拦截器/maxIterations、默认继承父 LLM、父/子 callback 与 trace 隔离（子代理用独立 noop callback 与独立 trace，内部事件不透出到父）
+  - 上下文裁剪：框架默认从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，排除 `llmVisible=false`，不含父 `systemPrompt`），可在注册时用 `contextSelector(...)` 覆盖
+  - 错误语义：子代理整体失败 → 外层 `ToolErrorEvent` + 错误文本回灌父 Agent，父循环继续；同轮多个子代理可并行并按原始顺序回灌
+  - 边界：仅支持一层委派（子代理不能再委派）、仅支持 `Agent` 自动循环，手写 `registry.execute("子代理名", ...)` fail-fast
+  - `Agent.safeExecute` 签名增加 `parentMessages` 快照参数（串/并行路径都传 `List.copyOf`），普通工具路径行为不变
+
+### 文档
+
+- `README.md` 新增「委派型子代理（SubAgent）」小节、特性列表与示例表补充
+- 新增示例 `SubAgentExample`（DIRECT/DELEGATE 两种模式）
+- `.trellis/spec/backend/tool-function-calling.md` 新增「SubAgent Registration vs Exposure」「SubAgent Runtime Isolation」契约章节
+- `.trellis/spec/backend/directory-structure.md` 补全 `agent/` 包文件列表与 SubAgent 注册步骤
+
 ## [0.8.5] - 2026-06-24
 
 ### 新增
