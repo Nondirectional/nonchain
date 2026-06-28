@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 29 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 30 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -55,6 +55,7 @@ mvn compile exec:java -pl chain-example \
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
+| `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 
 #### FunctionCallExample

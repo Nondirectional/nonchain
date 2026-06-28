@@ -7,7 +7,7 @@
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，支持阿里云 DashScope、vLLM 及任何 OpenAI 兼容端点（Ollama、LiteLLM）
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
-- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行和工具拦截器（before/after，可阻止/改写工具调用）
+- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行、工具拦截器（before/after，可阻止/改写工具调用）和委派型子代理（SubAgent，父 Agent 自主委派子任务并拿回结果）
 - **应用层消息分层** — `Message.note()` 产生 UI-only 状态消息（"正在思考"、"已读取文件"），进 transcript 供 UI 重放，在 LLM 边界被剥离不污染上下文
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
@@ -184,6 +184,57 @@ agent.run("查询用户信息");
 典型场景：危险命令审核/确认、工具结果脱敏、超长输出截断、工具熔断（黑名单/配额）。
 
 > **注意**：拦截器异常会被包装为 `AgentException` 抛出（不静默吞，让失败可见）；而 `ChainCallback` 的异常被静默隔离（观察失败不影响主流程）。两者职责不同，可在同一 Agent 共存。
+
+### 委派型子代理（SubAgent）
+
+委派型子代理让**父 Agent 通过 tool calling 自主把子任务委派给一个专职子代理**，子代理独立运行后把最终文本结果回传，父 Agent 继续后续推理。适合「调研 / 撰写」「规划 / 执行」这类可分工的场景。
+
+子代理作为一等 tool 能力注册在 `ToolRegistry`，由 `Agent.Builder` 决定暴露方式：
+
+- **DIRECT**（默认）：每个子代理暴露为一个独立 tool（schema 仅含 `task` 参数），父 Agent 直接 `research(task)` 委派
+- **DELEGATE**（显式开启）：只暴露一个通用 `delegate_to_subagent(agentName, task)`，`agentName` 为已注册子代理名的枚举
+
+```java
+ToolRegistry registry = new ToolRegistry();
+
+// 声明式注册子代理：description（给 LLM）与 systemPrompt（子代理角色）分开，description 必填
+registry.registerSubAgent("research", "负责调研与归纳")
+        .systemPrompt("你是调研代理。优先归纳事实，不编造。")
+        .toolRegistry(researchTools)   // 可选：子代理专属工具集（不设为无工具子代理）
+        .maxIterations(3)              // 可选：默认回退框架默认值
+        // .llm(researchLlm)           // 可选：默认继承父 Agent 的 LLM
+        .build();
+
+registry.registerSubAgent("writer", "负责撰写回复")
+        .systemPrompt("你是撰写代理。")
+        .build();
+
+// 父 Agent：默认 DIRECT 模式
+Agent agent = Agent.builder(llm, registry)
+        .systemPrompt("你是主助手，把子任务委派给合适的子代理。")
+        .build();
+
+agent.run("帮我调研量子计算并写一段介绍");
+```
+
+需要统一入口时切到 DELEGATE 模式：
+
+```java
+Agent agent = Agent.builder(llm, registry)
+        .subAgentExposureMode(SubAgentExposureMode.DELEGATE)
+        .build();
+```
+
+**默认行为与边界**：
+
+- 子代理默认**无状态**：独立 `systemPrompt`、独立工具集、独立 `before/after` 拦截器、独立 `maxIterations`，默认**继承父 LLM**
+- **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**不含父 `systemPrompt`**）；可在注册时用 `contextSelector(...)` 覆盖默认裁剪策略
+- **callback / trace 隔离**：父侧把子代理视为一次普通工具调用（`onToolStart`/`onToolComplete`/`onToolError`），子代理内部事件不透出到父
+- **错误语义**：子代理整体失败 → 外层记 `ToolErrorEvent` 并把错误文本回灌父 Agent，父循环继续
+- **并行**：同一轮多个子代理调用可并行执行，结果按原始 tool call 顺序回灌
+- **仅一层**：子代理不能再委派；**仅支持 `Agent` 自动循环**，手写 `registry.execute("子代理名", ...)` 会 fail-fast
+
+> **拦截器边界**：父 Agent 的 `before/after` 拦截器作用于外层子代理 tool 调用（可阻止/改写整次委派）；子代理注册时配置的拦截器仅作用于子代理内部工具，不继承父拦截器。
 
 ### 应用层消息与 LLM 消息分层
 
@@ -396,6 +447,7 @@ for (SearchResult result : response.results()) {
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
+| `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
