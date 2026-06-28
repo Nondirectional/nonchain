@@ -20,9 +20,14 @@ import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.non.chain.tool.ToolRegistry;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ForkJoinPool;
@@ -58,6 +63,7 @@ public class Agent {
     private final Executor executor;
     private final List<BeforeToolCall> beforeInterceptors;
     private final List<AfterToolCall> afterInterceptors;
+    private final SubAgentExposureMode subAgentExposureMode;
 
     private Agent(Builder builder) {
         this.llm = builder.llm;
@@ -69,6 +75,7 @@ public class Agent {
         this.executor = builder.executor;
         this.beforeInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.beforeInterceptors));
         this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
+        this.subAgentExposureMode = builder.subAgentExposureMode;
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -167,7 +174,7 @@ public class Agent {
     }
 
     private ChatResult doRunWithLoop(List<Message> messages, Consumer<AgentEvent> eventConsumer) {
-        List<Tool> tools = toolRegistry.getTools();
+        List<Tool> tools = resolveToolsForCurrentExposureMode();
         String traceId = ChainTrace.get();
 
         for (int round = 0; round < maxIterations; round++) {
@@ -225,7 +232,9 @@ public class Agent {
             final Message assistantMessage = result.toMessage();
 
             if (parallel) {
-                // 并行执行多个工具调用，按源顺序组装结果
+                // 并行执行多个工具调用，按源顺序组装结果。
+                // 父上下文快照在子代理执行时只读；本轮历史消息不会再原地修改，复制一份避免并发读写歧义。
+                final List<Message> parentSnapshot = List.copyOf(messages);
                 @SuppressWarnings("unchecked")
                 CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
                 for (int i = 0; i < toolCalls.size(); i++) {
@@ -234,7 +243,8 @@ public class Agent {
                         eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                     }
                     final int idx = i;
-                    futures[i] = CompletableFuture.supplyAsync(() -> safeExecute(tc, assistantMessage, traceId), executor)
+                    futures[i] = CompletableFuture.supplyAsync(
+                            () -> safeExecute(tc, assistantMessage, parentSnapshot, traceId), executor)
                             .whenComplete((output, err) -> {
                                 if (eventConsumer != null) {
                                     eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(),
@@ -253,11 +263,12 @@ public class Agent {
                 }
             } else {
                 // 单个工具调用或未配置 executor，串行执行
+                final List<Message> parentSnapshot = List.copyOf(messages);
                 for (ToolCall tc : toolCalls) {
                     if (eventConsumer != null) {
                         eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                     }
-                    String output = safeExecute(tc, assistantMessage, traceId);
+                    String output = safeExecute(tc, assistantMessage, parentSnapshot, traceId);
                     if (eventConsumer != null) {
                         eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
                     }
@@ -279,8 +290,11 @@ public class Agent {
      * <p>callback（onToolStart/onToolComplete/onToolError）仅在此触发一次。ToolRegistry.execute
      * 已不触发 callback（见 ToolRegistry）。before 返回 block 时跳过执行；after 可改写 content/isError。
      * 工具执行异常软失败回灌 LLM（保持现状语义）；拦截器异常包装为 AgentException 抛出（不静默吞）。</p>
+     *
+     * <p>{@code parentMessages} 为父 Agent 当前轮消息链快照，仅在执行子代理工具时用于裁剪父上下文。
+     * 普通工具路径不读取它，行为与改动前一致。</p>
      */
-    private String safeExecute(ToolCall tc, Message assistantMessage, String traceId) {
+    private String safeExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages, String traceId) {
         ToolCallContext ctx = new ToolCallContext(tc.id(), tc.name(), tc.arguments(), assistantMessage);
 
         // 1. callback: onToolStart（唯一触发点）
@@ -300,13 +314,13 @@ public class Agent {
                 }
             }
 
-            // 3. 实际执行（ToolRegistry.execute 已不触发 callback）
+            // 3. 实际执行（按工具类型三路分流）
             String result;
             boolean isError = false;
             try {
-                result = toolRegistry.execute(tc.name(), tc.arguments());
+                result = dispatchExecute(tc, assistantMessage, parentMessages, traceId);
             } catch (Exception execEx) {
-                // 工具执行错误：软失败（现状语义），仍允许 after 拦截器处理错误结果
+                // 工具/子代理执行错误：软失败（现状语义），仍允许 after 拦截器处理错误结果
                 result = "工具执行失败: " + execEx.getMessage();
                 isError = true;
             }
@@ -346,6 +360,143 @@ public class Agent {
         }
     }
 
+    /**
+     * 按工具类型分流执行：普通工具 / 独立子代理 tool / 通用 delegate tool。
+     * 普通工具走 {@link ToolRegistry#execute}；子代理工具走 {@link #executeSubAgentTool}。
+     */
+    private String dispatchExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages, String traceId) {
+        // 独立子代理 tool：tool 名即子代理名
+        if (toolRegistry.hasSubAgent(tc.name())) {
+            SubAgentDefinition def = toolRegistry.getSubAgent(tc.name());
+            String task = parseTaskArg(tc.arguments(), def.name());
+            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId);
+        }
+        // 通用 delegate tool：先解析 agentName 再定位子代理
+        if (ToolRegistry.DELEGATE_TOOL_NAME.equals(tc.name())) {
+            String agentName = parseAgentNameArg(tc.arguments());
+            SubAgentDefinition def = toolRegistry.getSubAgent(agentName);
+            String task = parseTaskArg(tc.arguments(), agentName);
+            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId);
+        }
+        // 普通工具：维持现状
+        return toolRegistry.execute(tc.name(), tc.arguments());
+    }
+
+    /**
+     * 执行子代理：构造裁剪上下文 → 动态构建子代理 Agent → 运行 → 返回最终文本。
+     *
+     * <p>父/子 callback 与 trace 隔离：子代理使用独立 noop callback 与独立 trace，
+     * 父侧仅在外层把它视为一次普通工具调用（onToolStart/onToolComplete/onToolError 由 safeExecute 触发）。
+     * 子代理整体抛出的异常向上传播，由 safeExecute 捕获后软失败回灌 LLM。</p>
+     */
+    private String executeSubAgentTool(SubAgentDefinition def, String task,
+                                       Message assistantMessage, List<Message> parentMessages, String traceId) {
+        // 1. 裁剪父上下文（不含父 systemPrompt；排除 llmVisible=false）
+        ContextSelector selector = def.contextSelector() != null
+                ? def.contextSelector() : DEFAULT_CONTEXT_SELECTOR;
+        List<Message> parentSlice = selector.select(parentMessages, assistantMessage, task);
+
+        // 2. 组装子代理消息：子代理 systemPrompt + 父上下文切片 + 本次 task
+        List<Message> childMessages = new ArrayList<>();
+        childMessages.add(Message.system(def.systemPrompt()));
+        childMessages.addAll(parentSlice);
+        childMessages.add(Message.user(task));
+
+        // 3. 动态构造子代理：默认继承父 LLM，独立工具集/拦截器/maxIterations，隔离 callback 与 trace
+        LLM childLlm = def.llmOverride() != null ? def.llmOverride() : this.llm;
+        ToolRegistry childRegistry = def.toolRegistry() != null ? def.toolRegistry() : new ToolRegistry();
+        Agent.Builder childBuilder = Agent.builder(childLlm, childRegistry)
+                .systemPrompt(def.systemPrompt())
+                .callback(ChainCallbackUtil.noop()); // 父/子 callback 隔离
+        if (def.maxIterations() != null) {
+            childBuilder.maxIterations(def.maxIterations());
+        }
+        for (BeforeToolCall b : def.beforeInterceptors()) {
+            childBuilder.addBeforeToolCall(b);
+        }
+        for (AfterToolCall a : def.afterInterceptors()) {
+            childBuilder.addAfterToolCall(a);
+        }
+        Agent child = childBuilder.build();
+
+        // 4. 子代理用自己的 trace 运行（run(List<Message>) 内部会生成独立 traceId 并在 finally 清理）
+        ChatResult childResult = child.run(childMessages);
+        return childResult.content() != null ? childResult.content() : "";
+    }
+
+    /** 子代理/delegate 工具共享的 JSON 参数解析器（与 ToolRegistry.parseArguments 同语义）。 */
+    private static final ObjectMapper SUBAGENT_ARG_MAPPER = new ObjectMapper();
+
+    /** 从独立子代理 tool 的 arguments 中解析 {@code task}。 */
+    private String parseTaskArg(String arguments, String agentName) {
+        Map<String, Object> map = parseArgsMap(arguments, "子代理调用");
+        Object task = map.get("task");
+        if (task == null || task.toString().isBlank()) {
+            throw new IllegalArgumentException("子代理调用缺少 task 参数: " + agentName);
+        }
+        return task.toString();
+    }
+
+    /** 从通用 delegate tool 的 arguments 中解析 {@code agentName}。 */
+    private String parseAgentNameArg(String arguments) {
+        Map<String, Object> map = parseArgsMap(arguments, "delegate 调用");
+        Object name = map.get("agentName");
+        if (name == null || name.toString().isBlank()) {
+            throw new IllegalArgumentException("delegate 调用缺少 agentName 参数");
+        }
+        return name.toString();
+    }
+
+    /**
+     * 把子代理/delegate tool 的 JSON arguments 解析为 Map（与 {@code ToolRegistry.parseArguments}
+     * 同语义，错误文案带前缀 {@code prefix} 以区分调用来源）。
+     */
+    private Map<String, Object> parseArgsMap(String arguments, String prefix) {
+        if (arguments == null || arguments.isBlank()) {
+            throw new IllegalArgumentException(prefix + "参数为空");
+        }
+        try {
+            Object parsed = SUBAGENT_ARG_MAPPER.readValue(arguments.trim(), Object.class);
+            if (!(parsed instanceof Map)) {
+                throw new IllegalArgumentException(prefix + "参数必须是 JSON 对象: " + arguments);
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) parsed;
+            return map;
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException(prefix + "参数 JSON 解析失败: " + arguments, e);
+        }
+    }
+
+    /**
+     * 按当前暴露模式解析传给 LLM 的工具列表。
+     * <ul>
+     *   <li>DIRECT（默认）：普通工具 + 每个子代理一个独立 tool。</li>
+     *   <li>DELEGATE：普通工具 + 单个 delegate_to_subagent tool（无子代理时仅普通工具）。</li>
+     * </ul>
+     */
+    private List<Tool> resolveToolsForCurrentExposureMode() {
+        List<Tool> tools = new ArrayList<>(toolRegistry.getRegularTools());
+        if (subAgentExposureMode == SubAgentExposureMode.DELEGATE) {
+            Optional<Tool> delegate = toolRegistry.getDelegateSubAgentTool();
+            delegate.ifPresent(tools::add);
+        } else {
+            tools.addAll(toolRegistry.getDirectSubAgentTools());
+        }
+        return tools;
+    }
+
+    /** 框架默认上下文裁剪：排除 llmVisible=false（含 note），保留其余父消息。 */
+    private static final ContextSelector DEFAULT_CONTEXT_SELECTOR = (parentMessages, assistantMessage, task) -> {
+        List<Message> visible = new ArrayList<>(parentMessages.size());
+        for (Message m : parentMessages) {
+            if (m.llmVisible()) {
+                visible.add(m);
+            }
+        }
+        return visible;
+    };
+
     public static class Builder {
 
         private final LLM llm;
@@ -355,6 +506,7 @@ public class Agent {
         private ChainCallback callback;
         private ChatMemory memory;
         private Executor executor = ForkJoinPool.commonPool();
+        private SubAgentExposureMode subAgentExposureMode = SubAgentExposureMode.DIRECT;
         private final List<BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<AfterToolCall> afterInterceptors = new ArrayList<>();
 
@@ -439,6 +591,20 @@ public class Agent {
          */
         public Builder executor(Executor executor) {
             this.executor = executor;
+            return this;
+        }
+
+        /**
+         * 设置子代理暴露模式（构建期固定，运行时不可切换）。
+         *
+         * <ul>
+         *   <li>{@link SubAgentExposureMode#DIRECT}（默认）：每个子代理暴露为独立 tool。</li>
+         *   <li>{@link SubAgentExposureMode#DELEGATE}：只暴露单个 {@code delegate_to_subagent} tool。</li>
+         * </ul>
+         * 传 {@code null} 回退默认值 {@code DIRECT}。
+         */
+        public Builder subAgentExposureMode(SubAgentExposureMode mode) {
+            this.subAgentExposureMode = mode == null ? SubAgentExposureMode.DIRECT : mode;
             return this;
         }
 
