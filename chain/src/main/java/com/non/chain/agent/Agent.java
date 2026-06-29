@@ -8,6 +8,7 @@ import com.non.chain.callback.ChainCallback;
 import com.non.chain.callback.ChainCallbackUtil;
 import com.non.chain.callback.ChainContext;
 import com.non.chain.callback.ChainTrace;
+import com.non.chain.callback.CompositeCallback;
 import com.non.chain.callback.event.LlmCompleteEvent;
 import com.non.chain.callback.event.LlmErrorEvent;
 import com.non.chain.callback.event.LlmStartEvent;
@@ -19,6 +20,12 @@ import com.non.chain.provider.LLM;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.non.chain.tool.ToolRegistry;
+import com.non.chain.trace.RecordingCallback;
+import com.non.chain.trace.SpanAttributes;
+import com.non.chain.trace.SpanContext;
+import com.non.chain.trace.TraceRuntimeIds;
+import com.non.chain.trace.Tracer;
+import com.non.chain.trace.TraceStore;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -65,6 +72,12 @@ public class Agent {
     private final List<AfterToolCall> afterInterceptors;
     private final SubAgentExposureMode subAgentExposureMode;
 
+    // ---- 执行链路遥测（trace 录制，可空；null = 未启用 = 零开销零行为变化） ----
+    private final Tracer tracer;
+    private final RecordingCallback recordingCallback;
+    /** SubAgent 全树下钻时注入的父 span context（边界1）；顶层 Agent 为 null。 */
+    private final SpanContext parentSpanContext;
+
     private Agent(Builder builder) {
         this.llm = builder.llm;
         this.toolRegistry = builder.toolRegistry;
@@ -76,6 +89,9 @@ public class Agent {
         this.beforeInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.beforeInterceptors));
         this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
         this.subAgentExposureMode = builder.subAgentExposureMode;
+        this.tracer = builder.tracer;
+        this.recordingCallback = builder.recordingCallback;
+        this.parentSpanContext = builder.parentSpanContext;
     }
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
@@ -166,9 +182,37 @@ public class Agent {
     private ChatResult runWithLoop(List<Message> messages, Consumer<AgentEvent> eventConsumer) {
         String traceId = ChainTrace.generate();
         ChainTrace.set(traceId);
+        if (tracer == null) {
+            // 未启用录制：保持现状（零开销零行为变化）
+            try {
+                return doRunWithLoop(messages, eventConsumer);
+            } finally {
+                ChainTrace.clear();
+            }
+        }
+        // 启用录制：用 agent_run 根 span 包住整个循环。
+        // parentSpanContext 非空（SubAgent 下钻）→ startChild（不切新根，挂到父委派 tool span 下）；
+        // 为空（顶层执行）→ startSpan 新根。
+        Tracer.ScopedSpan rootSpan = parentSpanContext != null
+                ? tracer.startChild(parentSpanContext, SpanAttributes.SpanType.AGENT_RUN, "agent")
+                : tracer.startSpan(SpanAttributes.SpanType.AGENT_RUN, "agent");
         try {
-            return doRunWithLoop(messages, eventConsumer);
+            rootSpan.putAttribute(SpanAttributes.SYSTEM_PROMPT, systemPrompt);
+            rootSpan.putAttribute(SpanAttributes.MAX_ITERATIONS, maxIterations);
+            try {
+                ChatResult result = doRunWithLoop(messages, eventConsumer);
+                // 成功路径：回填 runtimeId（失败路径在 catch 里 attach marker）
+                return result.withRuntimeId(rootSpan.runtimeId());
+            } catch (RuntimeException | Error e) {
+                // 失败路径：保留原异常类型/栈/语义不变，仅附加 suppressed trace marker
+                TraceRuntimeIds.attach(e, rootSpan.runtimeId());
+                throw e;
+            } catch (Exception e) {
+                TraceRuntimeIds.attach(e, rootSpan.runtimeId());
+                throw e;
+            }
         } finally {
+            rootSpan.close();
             ChainTrace.clear();
         }
     }
@@ -182,97 +226,115 @@ public class Agent {
                 eventConsumer.accept(new AgentEvent.RoundStart(round + 1));
             }
 
-            callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
-            ChatResult result;
-            long start = System.currentTimeMillis();
+            // trace 启用时：每轮开一个 llm span，覆盖「LLM 调用 + 本轮所有工具执行」。
+            // 这样 tool span（串行靠 current 栈、并行靠捕获的 llm ctx）自然挂到对应 llm 下。
+            final Tracer.ScopedSpan llmSpan = tracer != null
+                    ? tracer.startSpan(SpanAttributes.SpanType.LLM, "llm") : null;
             try {
-                if (eventConsumer != null) {
-                    result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
-                        if (chunk.hasContent()) {
-                            eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
-                        }
-                        if (chunk.hasThinking()) {
-                            eventConsumer.accept(new AgentEvent.ThinkingDelta(chunk.deltaThinking()));
-                        }
-                        if (chunk.hasToolCalls()) {
-                            for (ChatChunk.DeltaToolCall dtc : chunk.deltaToolCalls()) {
-                                eventConsumer.accept(new AgentEvent.ToolCallDelta(
-                                        dtc.index(), dtc.id(), dtc.name(), dtc.argumentsDelta()));
+                callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
+                ChatResult result;
+                long start = System.currentTimeMillis();
+                try {
+                    if (eventConsumer != null) {
+                        result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
+                            if (chunk.hasContent()) {
+                                eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
                             }
-                        }
-                    });
-                } else {
-                    result = llm.chat(messages, tools);
-                }
-                long latencyMs = System.currentTimeMillis() - start;
-                callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
-            } catch (Exception e) {
-                long latencyMs = System.currentTimeMillis() - start;
-                callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
-                if (eventConsumer != null) {
-                    eventConsumer.accept(new AgentEvent.AgentError(e));
-                }
-                throw e;
-            }
-            messages.add(result.toMessage());
-
-            if (eventConsumer != null) {
-                eventConsumer.accept(new AgentEvent.RoundEnd(round + 1));
-            }
-
-            if (!result.hasToolCalls()) {
-                if (eventConsumer != null) {
-                    eventConsumer.accept(new AgentEvent.Complete(result));
-                }
-                return result;
-            }
-
-            List<ToolCall> toolCalls = result.toolCalls();
-            boolean parallel = toolCalls.size() > 1 && executor != null;
-            final Message assistantMessage = result.toMessage();
-
-            if (parallel) {
-                // 并行执行多个工具调用，按源顺序组装结果。
-                // 父上下文快照在子代理执行时只读；本轮历史消息不会再原地修改，复制一份避免并发读写歧义。
-                final List<Message> parentSnapshot = List.copyOf(messages);
-                @SuppressWarnings("unchecked")
-                CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
-                for (int i = 0; i < toolCalls.size(); i++) {
-                    ToolCall tc = toolCalls.get(i);
-                    if (eventConsumer != null) {
-                        eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
-                    }
-                    final int idx = i;
-                    futures[i] = CompletableFuture.supplyAsync(
-                            () -> safeExecute(tc, assistantMessage, parentSnapshot, traceId), executor)
-                            .whenComplete((output, err) -> {
-                                if (eventConsumer != null) {
-                                    eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(),
-                                            err != null ? "工具执行失败: " + err.getMessage() : output));
+                            if (chunk.hasThinking()) {
+                                eventConsumer.accept(new AgentEvent.ThinkingDelta(chunk.deltaThinking()));
+                            }
+                            if (chunk.hasToolCalls()) {
+                                for (ChatChunk.DeltaToolCall dtc : chunk.deltaToolCalls()) {
+                                    eventConsumer.accept(new AgentEvent.ToolCallDelta(
+                                            dtc.index(), dtc.id(), dtc.name(), dtc.argumentsDelta()));
                                 }
-                            });
-                }
-                CompletableFuture.allOf(futures).join();
-                // 按原始顺序追加结果到 messages
-                for (int i = 0; i < toolCalls.size(); i++) {
-                    try {
-                        messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
-                    } catch (Exception e) {
-                        messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                            }
+                        });
+                    } else {
+                        result = llm.chat(messages, tools);
                     }
-                }
-            } else {
-                // 单个工具调用或未配置 executor，串行执行
-                final List<Message> parentSnapshot = List.copyOf(messages);
-                for (ToolCall tc : toolCalls) {
+                    long latencyMs = System.currentTimeMillis() - start;
+                    callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+                } catch (Exception e) {
+                    long latencyMs = System.currentTimeMillis() - start;
+                    callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+                    if (llmSpan != null) {
+                        llmSpan.markError(e);
+                    }
                     if (eventConsumer != null) {
-                        eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                        eventConsumer.accept(new AgentEvent.AgentError(e));
                     }
-                    String output = safeExecute(tc, assistantMessage, parentSnapshot, traceId);
+                    throw e;
+                }
+                messages.add(result.toMessage());
+
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.RoundEnd(round + 1));
+                }
+
+                if (!result.hasToolCalls()) {
                     if (eventConsumer != null) {
-                        eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                        eventConsumer.accept(new AgentEvent.Complete(result));
                     }
-                    messages.add(Message.toolResult(tc.id(), output));
+                    return result;
+                }
+
+                List<ToolCall> toolCalls = result.toolCalls();
+                boolean parallel = toolCalls.size() > 1 && executor != null;
+                final Message assistantMessage = result.toMessage();
+
+                if (parallel) {
+                    // 并行执行多个工具调用，按源顺序组装结果。
+                    // 父上下文快照在子代理执行时只读；本轮历史消息不会再原地修改，复制一份避免并发读写歧义。
+                    final List<Message> parentSnapshot = List.copyOf(messages);
+                    // 边界2：worker 线程 ThreadLocal 是空的，捕获当前 llm span 的 context，
+                    // worker 里用 startChild 建 tool span，parent 指向本轮 llm span。
+                    final SpanContext llmCtx = tracer != null ? Tracer.current() : null;
+                    @SuppressWarnings("unchecked")
+                    CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
+                    for (int i = 0; i < toolCalls.size(); i++) {
+                        ToolCall tc = toolCalls.get(i);
+                        if (eventConsumer != null) {
+                            eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                        }
+                        final int idx = i;
+                        final ToolCall finalTc = tc;
+                        futures[i] = CompletableFuture.supplyAsync(
+                                () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId),
+                                executor)
+                                .whenComplete((output, err) -> {
+                                    if (eventConsumer != null) {
+                                        eventConsumer.accept(new AgentEvent.ToolEnd(finalTc.name(),
+                                                err != null ? "工具执行失败: " + err.getMessage() : output));
+                                    }
+                                });
+                    }
+                    CompletableFuture.allOf(futures).join();
+                    // 按原始顺序追加结果到 messages
+                    for (int i = 0; i < toolCalls.size(); i++) {
+                        try {
+                            messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
+                        } catch (Exception e) {
+                            messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                        }
+                    }
+                } else {
+                    // 单个工具调用或未配置 executor，串行执行
+                    final List<Message> parentSnapshot = List.copyOf(messages);
+                    for (ToolCall tc : toolCalls) {
+                        if (eventConsumer != null) {
+                            eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                        }
+                        String output = executeWithToolSpan(tc, null, assistantMessage, parentSnapshot, traceId);
+                        if (eventConsumer != null) {
+                            eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                        }
+                        messages.add(Message.toolResult(tc.id(), output));
+                    }
+                }
+            } finally {
+                if (llmSpan != null) {
+                    llmSpan.close();
                 }
             }
         }
@@ -282,6 +344,39 @@ public class Agent {
             eventConsumer.accept(new AgentEvent.AgentError(ex));
         }
         throw ex;
+    }
+
+    /**
+     * 在 tool span 作用域内执行一次工具调用。
+     *
+     * <p>trace 启用时的 span 策略：</p>
+     * <ul>
+     *   <li><b>串行路径</b>（{@code parentCtx == null}）：current 栈正常，startSpan("tool")
+     *       自动以本轮 llm span 为 parent。</li>
+     *   <li><b>并行路径</b>（{@code parentCtx != null}）：worker 线程 ThreadLocal 空，
+     *       用 startChild(parentCtx, "tool") 显式恢复 parent（边界2）。</li>
+     * </ul>
+     * trace 未启用时（tracer 为 null）直接执行，无任何 span 开销。
+     */
+    private String executeWithToolSpan(ToolCall tc, SpanContext parentCtx,
+                                       Message assistantMessage, List<Message> parentMessages, String traceId) {
+        if (tracer == null) {
+            return safeExecute(tc, assistantMessage, parentMessages, traceId);
+        }
+        Tracer.ScopedSpan toolSpan = parentCtx != null
+                ? tracer.startChild(parentCtx, SpanAttributes.SpanType.TOOL, tc.name())
+                : tracer.startSpan(SpanAttributes.SpanType.TOOL, tc.name());
+        // 注意：safeExecute 对工具/子代理执行错误采用软失败（捕获后回灌 LLM，不抛出），
+        // 错误状态由 RecordingCallback.onToolError 标记到 span；这里只兜底真正向上传播的异常
+        // （如拦截器抛出的 AgentException）。
+        try {
+            return safeExecute(tc, assistantMessage, parentMessages, traceId);
+        } catch (RuntimeException e) {
+            toolSpan.markError(e);
+            throw e;
+        } finally {
+            toolSpan.close();
+        }
     }
 
     /**
@@ -407,7 +502,7 @@ public class Agent {
         ToolRegistry childRegistry = def.toolRegistry() != null ? def.toolRegistry() : new ToolRegistry();
         Agent.Builder childBuilder = Agent.builder(childLlm, childRegistry)
                 .systemPrompt(def.systemPrompt())
-                .callback(ChainCallbackUtil.noop()); // 父/子 callback 隔离
+                .callback(ChainCallbackUtil.noop()); // 父/子【用户面】callback 隔离（既有承诺不变）
         if (def.maxIterations() != null) {
             childBuilder.maxIterations(def.maxIterations());
         }
@@ -416,6 +511,18 @@ public class Agent {
         }
         for (AfterToolCall a : def.afterInterceptors()) {
             childBuilder.addAfterToolCall(a);
+        }
+        // 边界1（SubAgent 全树下钻）：录制层正交于用户面 callback——
+        // 子代理用户 callback 仍隔离（noop），但【录制 callback】不隔离：
+        // 注入父的 tracer + 当前 current SpanContext（即父委派 tool span 的 ctx），
+        // 子代理用自己的 RecordingCallback 实例，内部 LLM/Tool span 挂到父委派 tool span 下，进同一棵树。
+        SpanContext subParentCtx = null;
+        if (tracer != null) {
+            subParentCtx = Tracer.current();
+            if (subParentCtx != null) {
+                childBuilder.trace(tracer.store())
+                        .parentSpanContext(subParentCtx);
+            }
         }
         Agent child = childBuilder.build();
 
@@ -510,6 +617,14 @@ public class Agent {
         private final List<BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<AfterToolCall> afterInterceptors = new ArrayList<>();
 
+        // ---- trace（构建期决定，运行期生效） ----
+        private TraceStore traceStore;
+        /** Builder 复用的 tracer/recordingCallback（同一 Agent 实例共享一份）。 */
+        private Tracer tracer;
+        private RecordingCallback recordingCallback;
+        /** SubAgent 注入的父 span context（边界1）。 */
+        private SpanContext parentSpanContext;
+
         private Builder(LLM llm, ToolRegistry toolRegistry) {
             this.llm = llm;
             this.toolRegistry = toolRegistry;
@@ -549,6 +664,32 @@ public class Agent {
             if (chainContext != null && this.callback == null) {
                 this.callback = chainContext.callback();
             }
+            return this;
+        }
+
+        /**
+         * 启用执行链路遥测录制（opt-in）。
+         *
+         * <p>传入非空 {@link TraceStore} 即开启录制：Agent 每次执行会生成一棵 OTel 风格 span 树
+         * （agent_run 根 + 内嵌 LLM/Tool/SubAgent 子 span），存入 store，调用方可凭
+         * {@link ChatResult#runtimeId()} 拉回完整 trace。失败路径下 runtimeId 通过
+         * {@code TraceRuntimeIds.find(throwable)} 从异常里提取。</p>
+         *
+         * <p><b>默认全关</b>：不调用本方法 = 不录制 = 零开销、零行为变化。
+         * 不引入全局 static 开关、不加 ServiceLoader 自动发现。</p>
+         *
+         * <pre>{@code
+         * InMemoryTraceStore store = new InMemoryTraceStore();
+         * Agent agent = Agent.builder(llm, registry)
+         *     .systemPrompt("...")
+         *     .trace(store)        // ← 启用录制
+         *     .build();
+         * ChatResult r = agent.run("你好");
+         * Trace trace = store.getTrace(r.runtimeId()).orElseThrow();
+         * }</pre>
+         */
+        public Builder trace(TraceStore traceStore) {
+            this.traceStore = traceStore;
             return this;
         }
 
@@ -647,7 +788,36 @@ public class Agent {
             if (callback == null) {
                 callback = ChainCallbackUtil.noop();
             }
+            // 启用 trace 录制：构造 Tracer + RecordingCallback，并把录制 callback 与用户 callback 组合。
+            // 用户面 callback 与录制 callback 是两个独立实例（design §4.2 边界1）：
+            // SubAgent 用户隔离靠传 noop()（只隔离用户 callback），recordingCallback 单独注入下钻。
+            if (traceStore != null) {
+                this.tracer = new Tracer(traceStore);
+                this.recordingCallback = new RecordingCallback();
+                // CompositeCallback 独立执行每个 callback 且异常隔离（safeInvoke 静默吞）；
+                // RecordingCallback 内部也做了静默隔离，录制失败不污染主流程。
+                // 注意：RecordingCallback 只填充载荷，span 由 Agent/Graph 显式建/关。
+                this.callback = CompositeCallback.of(callback, recordingCallback);
+            }
             return new Agent(this);
+        }
+
+        /**
+         * 注入父 span context（SubAgent 全树下钻用，边界1）。包级入口，框架内部使用。
+         */
+        Builder parentSpanContext(SpanContext parentSpanContext) {
+            this.parentSpanContext = parentSpanContext;
+            return this;
+        }
+
+        /** 复用已构造的 tracer（SubAgent 注入用）。包级入口，框架内部使用。 */
+        Tracer tracer() {
+            return tracer;
+        }
+
+        /** 复用已构造的 recordingCallback（SubAgent 注入用）。包级入口，框架内部使用。 */
+        RecordingCallback recordingCallback() {
+            return recordingCallback;
         }
     }
 }

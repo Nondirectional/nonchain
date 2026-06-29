@@ -38,6 +38,14 @@ public class State {
         return data.containsKey(key);
     }
 
+    /**
+     * state 数据视图（只读快照）。用于 trace 录制采集 state_in/state_out 载荷，
+     * 以及任何需要读取当前 state 全量键值的场景。
+     */
+    public Map<String, Object> data() {
+        return Collections.unmodifiableMap(new HashMap<>(data));
+    }
+
     public State addMessage(Message message) {
         history.add(message);
         return this;

@@ -56,6 +56,7 @@ mvn compile exec:java -pl chain-example \
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 | `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
+| `TraceTelemetryExample` | 执行链路遥测：录制 Agent/SubAgent/Flow 整棵 span 树，按 runtimeId 拉回并序列化为 JSON |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 
 #### FunctionCallExample

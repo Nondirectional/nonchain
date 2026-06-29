@@ -141,6 +141,15 @@ Framework 层是 nonchain 的核心，提供了三大基础能力：工具管理
 - `ImageDataPart` — Base64 图片数据内容部件
 - `ChatResult` — LLM 响应结果，包含回复内容、思考内容和工具调用列表
 
+**执行链路遥测（trace/）：**
+
+- 为 Agent / Flow / SubAgent 的整棵执行链路录制 OTel 风格的 span 树（含 prompt/messages、入参出参、状态快照），供执行链路可视化与归档分析
+- **正交于用户面 `ChainCallback`**：录制层有自己的 span 传播路径（`SpanContext` 真相源 + `Tracer` current-span ThreadLocal 栈 + 三处硬边界显式传播），不寄生回调，因此能绕开 SubAgent 的 `noop()` 隔离实现全树下钻
+- **opt-in，默认零开销**：`Agent.builder(...).trace(store)` / `Graph.builder(name).traceStore(store)` 启用；不配置不录制，不引入全局 static 开关
+- 核心类型：`Span`（强类型骨架 + schemaless `attributes`）、`Trace`（一棵执行树 + JSON 序列化）、`SpanContext`（传播真相源）、`Tracer`（span 构建 + current 栈）、`TraceStore` SPI + `InMemoryTraceStore`、`RecordingCallback`（事件→span 载荷桥）、`TraceRuntimeIds`（失败路径 runtimeId 提取）
+- **单一 runtimeId，整棵树不切新根**：根 span 类型 `agent_run` / `graph_run`；失败路径保留原异常类型，runtimeId 通过 suppressed marker + `TraceRuntimeIds.find(throwable)` 暴露
+- 边界：库只到 Java API（`getTrace(id)` + JSON），可视化是独立消费端；OTel/LangSmith exporter 与持久化 store（MySQL/Postgres）作为独立可选模块后置
+
 ### Processing 层（数据处理）
 
 Processing 层负责文档的读取、清洗和切分，将原始文档转化为适合向量化和 LLM 处理的文本块。

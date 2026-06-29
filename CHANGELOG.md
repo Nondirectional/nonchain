@@ -5,6 +5,31 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
 ## [Unreleased]
+
+## [0.9.1] - 2026-06-29
+
+### 新增
+
+- 执行链路遥测（Trace Telemetry），为 Agent / Flow / SubAgent 的整棵执行链路录制 OTel 风格的 span 树（含 prompt/messages、入参出参、状态快照），供执行链路可视化与归档分析
+  - 新增 `trace/` 包：`Span`（强类型骨架 + schemaless `attributes` 载荷）、`Trace`（一棵执行树的扁平 span 列表 + JSON）、`SpanContext`（不可变传播真相源）、`SpanAttributes`（key/type 常量挡拼写）、`Tracer`（span 构建 + current-span ThreadLocal 栈 + `ScopedSpan` 作用域）、`TraceStore` SPI、`InMemoryTraceStore`（有界 LRU、并发安全）、`TraceSerializer`（Trace ↔ JSON 稳定 schema）、`RecordingCallback`（事件→span 载荷桥）、`TraceMarker` + `TraceRuntimeIds`（失败路径 runtimeId 提取）
+  - **opt-in，默认零开销**：`Agent.builder(...).trace(store)` / `Graph.builder(name).traceStore(store)` 启用，不配置不录制；不引入全局 static 开关、不加 ServiceLoader 自动发现
+  - **单一 runtimeId，整棵树不切新根**：runtimeId = 一次顶层执行，根 span 类型 `agent_run` / `graph_run`；内嵌 Agent/Flow/SubAgent/LLM/工具全是同一棵树的子 span
+  - **SubAgent 全树下钻**：录制层正交于用户面 `ChainCallback`（不寄生回调、有自己的 span 传播路径），绕开 SubAgent 的 `noop()` 隔离，把子代理内部 LLM/工具调用录制进同一棵树
+  - **三处硬边界显式传播**：SubAgent 构建点（注入父 span context + 独立 RecordingCallback 实例）、并行工具（worker 线程捕获 llm span context 用 `startChild`）、Flow 节点（`node.apply` 前 push current，`state_in`/`state_out` 本地采集）
+  - **成功/失败两条路径都能拿到 runtimeId**：成功从 `ChatResult.runtimeId()` / `GraphResult.runtimeId()`；失败保留原异常类型/语义不变，runtimeId 通过附加的 suppressed `TraceMarker` + `TraceRuntimeIds.find(throwable)` 暴露（不引入包装异常改变既有 `catch` 语义）
+  - `ChatResult` / `GraphResult` 新增可空 `runtimeId()`（纯新增）；`State` 新增只读 `data()` 访问器（纯新增）；既有 `ChainTrace` / `ChainCallback` / 事件 `traceId` 字段原样不动
+  - 边界声明：库只到 Java API（`getTrace(id)` + JSON 序列化），不起 HTTP、不画 UI；可视化是独立消费端
+- 执行链路遥测的持久化存储实现：`chain-mysql` / `chain-postgres` 新增 `MysqlTraceStore` / `PostgresTraceStore`（`TraceStore` SPI 实现），把 span 落到 `trace_span` 表（schema 见各模块 `trace_span.sql`），按 runtimeId 拉回完整树
+  - 与 `MysqlChatMemoryStore` / `PostgresChatMemoryStore` 同风格：JDBC + DataSource、可移植幂等写入（同事务内按 span_id DELETE+INSERT）、attributes 整体 JSON 序列化、异常包装为 `RuntimeException` + 中文消息
+  - `Span` 新增 public `restored(...)` 重建工厂（供 getTrace 从持久化读回已定稿 span）；`TraceSerializer` 新增 public `serializeAttributes` / `deserializeAttributes`（供持久化列存储编解码）
+  - 修复 `chain-mysql` / `chain-postgres` 的 parent pom version（0.8.5 → 0.9.0，之前未跟随升级导致无法引用 chain 新 API）
+
+### 文档
+
+- `README.md` 新增「执行链路遥测（Trace Telemetry）」小节（含内存版与 MySQL/PostgreSQL 持久化用法），特性列表、模块说明、示例表补充
+- 新增示例 `TraceTelemetryExample`（单 Agent trace / SubAgent 下钻 / Flow→节点内 Agent 嵌套 / 失败路径提取 runtimeId）
+- `.trellis/spec/backend/directory-structure.md` 补全 `trace/` 包文件列表与启用遥测的契约说明
+
 ## [0.9.0] - 2026-06-28
 
 ### 新增

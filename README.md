@@ -16,6 +16,7 @@
 - **统一检索** — Elasticsearch 单独承担向量检索、BM25 与混合检索，支持元数据过滤和 RRF / Linear 融合策略
 - **上下文扩展** — 命中 chunk 后基于 chunkIndex 向前后扩展邻居 chunk，补齐上下文窗口
 - **统一回调 (ChainCallback)** — 覆盖 LLM、Tool、Retrieval、Graph 的 Start/Complete/Error 生命周期，支持 traceId 关联和多订阅者组合
+- **执行链路遥测 (Trace Telemetry)** — opt-in 录制整棵执行链路（Agent/Flow/SubAgent/LLM/工具）的 OTel 风格 span 树，单一 runtimeId、SubAgent 全树下钻、可插拔 TraceStore + JSON 序列化，供执行链路可视化与归档分析
 - **结构化输出** — 支持 JSON Object 响应格式
 
 ## 要求
@@ -289,6 +290,61 @@ GraphResult result = graph.run(State.of(Map.of(), List.of(
 )));
 ```
 
+### 执行链路遥测（Trace Telemetry）
+
+执行链路遥测为 Agent / Flow / SubAgent 的整棵执行链路录制 OTel 风格的 span 树（含 prompt/messages、入参出参、状态快照），供执行链路可视化与归档分析。
+
+**核心特性：**
+
+- **opt-in，默认零开销**：不配置不录制；显式 `.trace(store)` / `.traceStore(store)` 才录。不引入全局 static 开关。
+- **单一 runtimeId，整棵树不切新根**：runtimeId = 一次顶层执行，根 span 类型为 `agent_run` 或 `graph_run`；内嵌的 Agent/Flow/SubAgent/LLM/工具全是同一棵树的子 span。
+- **SubAgent 全树下钻**：录制层**正交于**用户面 `ChainCallback`，不寄生回调，因此能绕开 SubAgent 的 `noop()` 隔离，把子代理内部的 LLM/工具调用录制进同一棵树。
+- **可插拔存储 + 开箱即用**：`TraceStore` SPI，内置 `InMemoryTraceStore`（有界 LRU、并发安全）；另提供 `chain-mysql` / `chain-postgres` 持久化实现（`MysqlTraceStore` / `PostgresTraceStore`），按 runtimeId 落库拉回。`Trace` 也可序列化为稳定 JSON。
+
+```java
+InMemoryTraceStore store = new InMemoryTraceStore();
+
+Agent agent = Agent.builder(llm, registry)
+        .systemPrompt("...")
+        .trace(store)            // ← 启用录制
+        .build();
+
+ChatResult result = agent.run("你好");
+String runtimeId = result.runtimeId();   // 成功路径直接拿 id
+
+Trace trace = store.getTrace(runtimeId).orElseThrow();
+System.out.println(trace.toJson());       // 序列化整棵 span 树
+```
+
+**持久化存储**：需要跨进程/重启保留 trace 时，用 `chain-mysql` / `chain-postgres` 提供的持久化实现（建表 SQL 见各模块 `trace_span.sql`），API 与内存版完全一致：
+
+```java
+// MySQL
+TraceStore store = new MysqlTraceStore(dataSource);
+// 或 PostgreSQL
+TraceStore store = new PostgresTraceStore(dataSource);
+
+Agent agent = Agent.builder(llm, registry).systemPrompt("...").trace(store).build();
+ChatResult result = agent.run("你好");
+Trace trace = store.getTrace(result.runtimeId()).orElseThrow();
+```
+
+**失败路径也能拿到 runtimeId**：异常场景下保留原异常类型/语义不变，runtimeId 通过附加的 suppressed marker 暴露：
+
+```java
+try {
+    agent.run("...");
+} catch (RuntimeException e) {
+    Optional<String> rid = TraceRuntimeIds.find(e);   // 从异常链提取 runtimeId
+    rid.ifPresent(id -> store.getTrace(id));           // 回捞失败 trace
+    throw e;                                            // 原异常语义不变
+}
+```
+
+Graph 同理：`Graph.builder(name).traceStore(store)`，运行后从 `GraphResult.runtimeId()` 取回；节点体内部若调用 `agent.run()`（且该 Agent 共享同一 store），其 span 会通过 ThreadLocal 自动挂在对应 `graph_node` span 下，形成完整嵌套树。
+
+> 边界声明：nonchain 是库，**只到 Java API（`getTrace(id)` + JSON 序列化）**，不起 HTTP、不画 UI。可视化是独立消费端。完整示例见 `TraceTelemetryExample`。
+
 ### 文档处理
 
 ```java
@@ -391,11 +447,11 @@ for (SearchResult result : response.results()) {
 
 | 模块 | 说明 |
 |------|------|
-| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、统一回调 (ChainCallback)、知识存储接口、文档模型、Embedding、多模态消息、MessageSerializer |
+| `chain` | 核心模块：LLM 抽象、工具函数、图工作流、统一回调 (ChainCallback)、知识存储接口、文档模型、Embedding、多模态消息、MessageSerializer、执行链路遥测 (trace) |
 | `chain-document` | 文档处理：TXT/MD/HTML/DOCX/PDF 解析 + OCR + 清洗管道 + 5 种文档切分策略 |
 | `chain-elasticsearch` | Elasticsearch 向量存储、BM25 检索、原生 retriever 混合检索 |
-| `chain-mysql` | MySQL 对话记忆持久化存储 |
-| `chain-postgres` | PostgreSQL 对话记忆持久化存储 |
+| `chain-mysql` | MySQL 持久化：对话记忆（`MysqlChatMemoryStore`）、执行链路遥测（`MysqlTraceStore`） |
+| `chain-postgres` | PostgreSQL 持久化：对话记忆（`PostgresChatMemoryStore`）、执行链路遥测（`PostgresTraceStore`） |
 | `chain-example` | 示例代码（可运行 Demo） |
 
 ## 架构
@@ -448,6 +504,7 @@ for (SearchResult result : response.results()) {
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 | `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
+| `TraceTelemetryExample` | 执行链路遥测：录制 Agent/SubAgent/Flow 整棵 span 树，按 runtimeId 拉回并序列化为 JSON |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
