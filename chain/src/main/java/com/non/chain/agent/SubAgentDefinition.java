@@ -1,5 +1,6 @@
 package com.non.chain.agent;
 
+import com.non.chain.memory.ChatMemoryStore;
 import com.non.chain.provider.LLM;
 import com.non.chain.tool.ToolRegistry;
 
@@ -9,7 +10,7 @@ import java.util.List;
 /**
  * 子代理定义：不可变值对象，描述一个委派型子代理的全部配置。
  *
- * <p>由 {@link SubAgentRegistration#build()} 产出，存储在 {@link ToolRegistry} 中，
+ * <p>由 {@code SubAgentRegistration#build()} 产出，存储在 {@link ToolRegistry} 中，
  * 在父 Agent 执行委派时被读取以动态构造子代理 {@link Agent} 实例。</p>
  *
  * <p>注册时不预构建 {@code Agent}，因为子代理默认继承父 LLM、依赖运行时上下文、
@@ -26,12 +27,23 @@ public final class SubAgentDefinition {
     private final ContextSelector contextSelector;    // nullable：为空时用框架默认裁剪
     private final List<BeforeToolCall> beforeInterceptors;
     private final List<AfterToolCall> afterInterceptors;
+    private final ChatMemoryStore chatMemoryStore;    // nullable：为空 = 无状态(0.9.0 语义,D7)
 
     public SubAgentDefinition(String name, String description, String systemPrompt,
                               ToolRegistry toolRegistry, LLM llmOverride, Integer maxIterations,
                               ContextSelector contextSelector,
                               List<BeforeToolCall> beforeInterceptors,
                               List<AfterToolCall> afterInterceptors) {
+        this(name, description, systemPrompt, toolRegistry, llmOverride, maxIterations,
+                contextSelector, beforeInterceptors, afterInterceptors, null);
+    }
+
+    public SubAgentDefinition(String name, String description, String systemPrompt,
+                              ToolRegistry toolRegistry, LLM llmOverride, Integer maxIterations,
+                              ContextSelector contextSelector,
+                              List<BeforeToolCall> beforeInterceptors,
+                              List<AfterToolCall> afterInterceptors,
+                              ChatMemoryStore chatMemoryStore) {
         this.name = name;
         this.description = description;
         this.systemPrompt = systemPrompt;
@@ -43,6 +55,7 @@ public final class SubAgentDefinition {
                 ? Collections.emptyList() : Collections.unmodifiableList(beforeInterceptors);
         this.afterInterceptors = afterInterceptors == null
                 ? Collections.emptyList() : Collections.unmodifiableList(afterInterceptors);
+        this.chatMemoryStore = chatMemoryStore;
     }
 
     public String name() {
@@ -80,4 +93,15 @@ public final class SubAgentDefinition {
     public List<AfterToolCall> afterInterceptors() {
         return afterInterceptors;
     }
+
+    /**
+     * 对话记忆存储(D7 resume)。null = 无状态,保持 0.9.0 语义(每次动态构造、无记忆);
+     * 非 null 时子代理变为有状态,委派完成后历史存入,再次委派走 resume。
+     *
+     * @return ChatMemoryStore,可能为 null
+     */
+    public ChatMemoryStore chatMemoryStore() {
+        return chatMemoryStore;
+    }
 }
+

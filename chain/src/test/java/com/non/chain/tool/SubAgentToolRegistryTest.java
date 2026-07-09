@@ -114,10 +114,11 @@ public class SubAgentToolRegistryTest {
         assertEquals("research", tool.name());
         assertEquals("负责调研与归纳", tool.description());
 
-        // schema 只含 task
+        // schema 含 task(必填) + run_in_background(可选,D11)
         Map<String, Map<String, Object>> schemas = schemasOf(tool);
         assertTrue(schemas.containsKey("task"));
-        assertEquals(1, schemas.size());
+        assertTrue(schemas.containsKey("run_in_background"));
+        assertEquals(2, schemas.size());
 
         List<String> required = requiredOf(tool);
         assertEquals(List.of("task"), required);

@@ -293,10 +293,12 @@ public class AgentTest {
 
     @Test
     public void testMaxIterationsExceeded() {
-        // LLM 一直调用工具，触发最大迭代限制
+        // LLM 一直调用工具。review 关键点1:顶层也走 graceful,默认不再抛异常,
+        // 而是跑到 maxIterations + graceTurns 后返回部分结果。
+        // graceTurns(0) 可回退 0.9.0 硬截断(抛异常)。
         ToolCall toolCall = new ToolCall("call_1", "search", "{\"q\":\"test\"}");
         List<ChatResult> endlessResponses = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
+        for (int i = 0; i < 30; i++) {
             endlessResponses.add(new ChatResult("", null, Collections.singletonList(toolCall)));
         }
 
@@ -306,13 +308,23 @@ public class AgentTest {
         registry.register("search", "搜索")
                 .handle(args -> "搜索结果");
 
-        Agent agent = Agent.builder(llm, registry)
+        // 1. 默认 graceful(maxIterations=3 + graceTurns=3):不抛异常,返回部分结果
+        Agent gracefulAgent = Agent.builder(llm, registry)
                 .maxIterations(3)
+                .graceTurns(3)
                 .build();
+        ChatResult gracefulResult = gracefulAgent.run("无限循环测试");
+        assertNotNull(gracefulResult);  // graceful 返回结果而非抛异常
 
+        // 2. graceTurns(0):回退 0.9.0 硬截断抛异常
+        MockLLM llm2 = new MockLLM(new ArrayList<>(endlessResponses));
+        Agent hardAgent = Agent.builder(llm2, registry)
+                .maxIterations(3)
+                .graceTurns(0)
+                .build();
         try {
-            agent.run("无限循环测试");
-            fail("应抛出 AgentException");
+            hardAgent.run("无限循环测试");
+            fail("graceTurns(0) 应回退 0.9.0 硬截断,抛 AgentException");
         } catch (AgentException e) {
             assertTrue(e.getMessage().contains("超出最大迭代次数"));
             assertTrue(e.getMessage().contains("3"));
@@ -484,6 +496,7 @@ public class AgentTest {
 
     @Test
     public void testStreamingMaxIterationsError() {
+        // review 关键点1:默认 graceful,用 graceTurns(0) 回退抛异常路径测试
         ToolCall toolCall = new ToolCall("call_1", "search", "{\"q\":\"test\"}");
         List<ChatResult> endlessResponses = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
@@ -494,7 +507,7 @@ public class AgentTest {
         ToolRegistry registry = new ToolRegistry();
         registry.register("search", "搜索").handle(args -> "结果");
 
-        Agent agent = Agent.builder(llm, registry).maxIterations(3).build();
+        Agent agent = Agent.builder(llm, registry).maxIterations(3).graceTurns(0).build();
 
         List<AgentEvent> events = new ArrayList<>();
         try {

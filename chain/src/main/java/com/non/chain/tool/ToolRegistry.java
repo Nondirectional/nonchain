@@ -25,6 +25,10 @@ public class ToolRegistry {
 
     /** 通用 delegate tool 的固定名称（仅 DELEGATE 模式暴露时使用）。 */
     public static final String DELEGATE_TOOL_NAME = "delegate_to_subagent";
+    /** D3 get_subagent_result 工具名 */
+    public static final String GET_RESULT_TOOL_NAME = "get_subagent_result";
+    /** D6 steer_subagent 工具名 */
+    public static final String STEER_TOOL_NAME = "steer_subagent";
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -154,7 +158,8 @@ public class ToolRegistry {
     }
 
     /**
-     * DIRECT 模式：每个子代理暴露为一个独立 tool，schema 仅含必填 {@code task} 参数。
+     * DIRECT 模式：每个子代理暴露为一个独立 tool。schema 含必填 {@code task} +
+     * 可选 {@code run_in_background}(D11 调用级前后台)。
      * tool 名等于子代理名。
      */
     public List<Tool> getDirectSubAgentTools() {
@@ -164,6 +169,7 @@ public class ToolRegistry {
                 tools.add(Tool.builder(def.name())
                         .description(def.description())
                         .addProperty("task", "string", "需要委派给该子代理的任务", true)
+                        .addProperty("run_in_background", "boolean", "是否后台执行(默认 false)", false)
                         .build());
             }
         }
@@ -172,7 +178,7 @@ public class ToolRegistry {
 
     /**
      * DELEGATE 模式：单个通用 {@code delegate_to_subagent} tool，{@code agentName}
-     * 为已注册子代理名的枚举。无子代理时返回空 Optional（不应暴露空 delegate tool）。
+     * 为已注册子代理名的枚举。含可选 {@code run_in_background}(D11)。无子代理时返回空 Optional。
      */
     public java.util.Optional<Tool> getDelegateSubAgentTool() {
         if (subAgents.isEmpty()) {
@@ -182,8 +188,31 @@ public class ToolRegistry {
                 .description("将任务委派给已注册的子代理")
                 .addProperty("agentName", "string", "目标子代理名称", true, subAgentNames())
                 .addProperty("task", "string", "委派任务", true)
+                .addProperty("run_in_background", "boolean", "是否后台执行(默认 false)", false)
                 .build();
         return java.util.Optional.of(tool);
+    }
+
+    /**
+     * D3/D6:有已注册子代理时,额外暴露 get_subagent_result + steer_subagent 工具。
+     * 无子代理时返回空 list(不暴露这两个工具)。
+     */
+    public List<Tool> getSubAgentControlTools() {
+        if (subAgents.isEmpty()) {
+            return new ArrayList<>();
+        }
+        List<Tool> tools = new ArrayList<>();
+        tools.add(Tool.builder(GET_RESULT_TOOL_NAME)
+                .description("查询/等待后台子代理的结果")
+                .addProperty("subagent_id", "string", "后台子代理 ID", true)
+                .addProperty("wait", "boolean", "是否阻塞等待完成(默认 false)", false)
+                .build());
+        tools.add(Tool.builder(STEER_TOOL_NAME)
+                .description("向运行中的后台子代理注入转向消息")
+                .addProperty("subagent_id", "string", "后台子代理 ID", true)
+                .addProperty("message", "string", "转向指令", true)
+                .build());
+        return tools;
     }
 
     /**
@@ -212,6 +241,12 @@ public class ToolRegistry {
         }
         if (DELEGATE_TOOL_NAME.equals(name)) {
             throw new IllegalStateException("delegate_to_subagent 仅支持在 Agent 自动循环中执行");
+        }
+        if (GET_RESULT_TOOL_NAME.equals(name)) {
+            throw new IllegalStateException("get_subagent_result 仅支持在 Agent 自动循环中执行");
+        }
+        if (STEER_TOOL_NAME.equals(name)) {
+            throw new IllegalStateException("steer_subagent 仅支持在 Agent 自动循环中执行");
         }
         ToolEntry entry = entries.get(name);
         if (entry == null) {
@@ -439,6 +474,7 @@ public class ToolRegistry {
         private com.non.chain.provider.LLM llmOverride;
         private Integer maxIterations;
         private com.non.chain.agent.ContextSelector contextSelector;
+        private com.non.chain.memory.ChatMemoryStore chatMemoryStore;
         private final List<com.non.chain.agent.BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<com.non.chain.agent.AfterToolCall> afterInterceptors = new ArrayList<>();
 
@@ -477,6 +513,15 @@ public class ToolRegistry {
             return this;
         }
 
+        /**
+         * 对话记忆存储(D7 resume)。默认 null = 无状态(0.9.0 语义);
+         * 配置后子代理变为有状态,支持 resume。
+         */
+        public SubAgentRegistration chatMemoryStore(com.non.chain.memory.ChatMemoryStore store) {
+            this.chatMemoryStore = store;
+            return this;
+        }
+
         public SubAgentRegistration addBeforeToolCall(com.non.chain.agent.BeforeToolCall interceptor) {
             if (interceptor != null) {
                 this.beforeInterceptors.add(interceptor);
@@ -494,14 +539,21 @@ public class ToolRegistry {
         /**
          * 构建并写入 {@link ToolRegistry}（同名注册时 {@code registerSubAgent} 已校验，
          * 此处不再重复检查）。
+         *
+         * <p>D10 fail-fast:子代理的 toolRegistry 若注册了 subAgent,抛异常(仅一层委派)。</p>
          */
         public ToolRegistry build() {
             if (systemPrompt == null || systemPrompt.isBlank()) {
                 throw new IllegalStateException("子代理 systemPrompt 不能为空: " + name);
             }
+            // D10:子代理不支持嵌套委派
+            if (toolRegistry != null && !toolRegistry.subAgentNames().isEmpty()) {
+                throw new IllegalStateException(
+                        "子代理不支持嵌套委派: " + name + " 的 toolRegistry 含 subAgent");
+            }
             SubAgentDefinition def = new SubAgentDefinition(
                     name, description, systemPrompt, toolRegistry, llmOverride, maxIterations,
-                    contextSelector, beforeInterceptors, afterInterceptors);
+                    contextSelector, beforeInterceptors, afterInterceptors, chatMemoryStore);
             registry.subAgents.put(name, def);
             return registry;
         }

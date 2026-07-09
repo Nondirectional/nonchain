@@ -35,8 +35,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ForkJoinPool;
 import java.util.function.Consumer;
 
@@ -60,17 +62,29 @@ import java.util.function.Consumer;
 public class Agent {
 
     private static final int DEFAULT_MAX_ITERATIONS = 10;
+    /** D9 graceful grace turns 默认值;Builder.graceTurns(0) 可禁用(回退 0.9.0 硬截断抛异常) */
+    private static final int DEFAULT_GRACE_TURNS = 3;
 
     private final LLM llm;
     private final ToolRegistry toolRegistry;
     private final String systemPrompt;
     private final int maxIterations;
+    private final int graceTurns;
     private final ChainCallback callback;
     private final ChatMemory memory;
     private final Executor executor;
     private final List<BeforeToolCall> beforeInterceptors;
     private final List<AfterToolCall> afterInterceptors;
     private final SubAgentExposureMode subAgentExposureMode;
+
+    // ---- 后台子代理配置(D4)----
+    private final ExecutorService backgroundExecutor;
+    private final int maxBackgroundRunning;
+    private final int spawnCeiling;
+    private final long awaitTimeoutMs;
+
+    // ---- steer(D6):null = 未启用(顶层/前台);非 null = 子代理实例,支持运行中注入 ----
+    private final BlockingQueue<String> pendingSteers;
 
     // ---- 执行链路遥测（trace 录制，可空；null = 未启用 = 零开销零行为变化） ----
     private final Tracer tracer;
@@ -83,12 +97,19 @@ public class Agent {
         this.toolRegistry = builder.toolRegistry;
         this.systemPrompt = builder.systemPrompt;
         this.maxIterations = builder.maxIterations;
+        this.graceTurns = builder.graceTurns;
         this.callback = builder.callback;
         this.memory = builder.memory;
         this.executor = builder.executor;
         this.beforeInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.beforeInterceptors));
         this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
         this.subAgentExposureMode = builder.subAgentExposureMode;
+        this.backgroundExecutor = builder.backgroundExecutor;
+        this.maxBackgroundRunning = builder.maxBackgroundRunning;
+        this.spawnCeiling = builder.spawnCeiling != null ? builder.spawnCeiling
+                : maxIterations * maxBackgroundRunning * 2;
+        this.awaitTimeoutMs = builder.awaitTimeoutMs;
+        this.pendingSteers = builder.pendingSteers;
         this.tracer = builder.tracer;
         this.recordingCallback = builder.recordingCallback;
         this.parentSpanContext = builder.parentSpanContext;
@@ -96,6 +117,23 @@ public class Agent {
 
     public static Builder builder(LLM llm, ToolRegistry toolRegistry) {
         return new Builder(llm, toolRegistry);
+    }
+
+    /**
+     * 运行中注入消息(D6 steer)。仅后台子代理支持(pendingSteers 非空);
+     * 顶层/前台 Agent 调用抛 UnsupportedOperationException。
+     *
+     * <p>注入的消息在子代理下一轮 LLM 调用前作为 user message 加入对话(非即时中断)。</p>
+     *
+     * @param message 转向消息
+     */
+    public void steer(String message) {
+        if (pendingSteers == null) {
+            throw new UnsupportedOperationException("steer 仅支持后台子代理");
+        }
+        if (message != null && !message.isBlank()) {
+            pendingSteers.add(message);
+        }
     }
 
     /**
@@ -221,129 +259,197 @@ public class Agent {
         List<Tool> tools = resolveToolsForCurrentExposureMode();
         String traceId = ChainTrace.get();
 
-        for (int round = 0; round < maxIterations; round++) {
-            if (eventConsumer != null) {
-                eventConsumer.accept(new AgentEvent.RoundStart(round + 1));
-            }
+        // D9 graceful:循环上界 = maxIterations + graceTurns(顶层和子代理统一,关键点1)
+        // graceTurns=0 时回退 0.9.0 硬截断(抛异常)
+        int hardLimit = maxIterations;
+        int totalLimit = maxIterations + graceTurns;
+        SubAgentStatus finalStatus = SubAgentStatus.COMPLETED;
+        ChatResult lastResult = null;
 
-            // trace 启用时：每轮开一个 llm span，覆盖「LLM 调用 + 本轮所有工具执行」。
-            // 这样 tool span（串行靠 current 栈、并行靠捕获的 llm ctx）自然挂到对应 llm 下。
-            final Tracer.ScopedSpan llmSpan = tracer != null
-                    ? tracer.startSpan(SpanAttributes.SpanType.LLM, "llm") : null;
-            try {
-                callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
-                ChatResult result;
-                long start = System.currentTimeMillis();
-                try {
-                    if (eventConsumer != null) {
-                        result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
-                            if (chunk.hasContent()) {
-                                eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
-                            }
-                            if (chunk.hasThinking()) {
-                                eventConsumer.accept(new AgentEvent.ThinkingDelta(chunk.deltaThinking()));
-                            }
-                            if (chunk.hasToolCalls()) {
-                                for (ChatChunk.DeltaToolCall dtc : chunk.deltaToolCalls()) {
-                                    eventConsumer.accept(new AgentEvent.ToolCallDelta(
-                                            dtc.index(), dtc.id(), dtc.name(), dtc.argumentsDelta()));
-                                }
-                            }
-                        });
+        // D2:后台管理器绑定本次 run()。无子代理时 join/awaitAll 都是空操作,零开销。
+        BackgroundSubAgentManager bgManager = new BackgroundSubAgentManager(
+                this, maxBackgroundRunning, spawnCeiling, backgroundExecutor, eventConsumer, awaitTimeoutMs);
+        String parentRunId = tracer != null ? traceId : traceId;  // run() 标识
+
+        try {
+            for (int round = 0; round < totalLimit; round++) {
+                // D9:到达 hardLimit 时自动注入"收尾"消息(grace 阶段开始)
+                if (round == hardLimit && graceTurns > 0) {
+                    String wrapUp = "已达轮数上限,请立即收尾输出最终结果。";
+                    if (pendingSteers != null) {
+                        pendingSteers.add(wrapUp);
                     } else {
-                        result = llm.chat(messages, tools);
+                        messages.add(Message.user(wrapUp));
                     }
-                    long latencyMs = System.currentTimeMillis() - start;
-                    callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
-                } catch (Exception e) {
-                    long latencyMs = System.currentTimeMillis() - start;
-                    callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
-                    if (llmSpan != null) {
-                        llmSpan.markError(e);
-                    }
-                    if (eventConsumer != null) {
-                        eventConsumer.accept(new AgentEvent.AgentError(e));
-                    }
-                    throw e;
+                    finalStatus = SubAgentStatus.STEERED;
                 }
-                messages.add(result.toMessage());
+
+                // D6 steer 检查点:每轮 LLM 调用前 drain pendingSteers(仅子代理实例)
+                if (pendingSteers != null) {
+                    String steer;
+                    while ((steer = pendingSteers.poll()) != null) {
+                        messages.add(Message.user(steer));
+                    }
+                }
 
                 if (eventConsumer != null) {
-                    eventConsumer.accept(new AgentEvent.RoundEnd(round + 1));
+                    eventConsumer.accept(new AgentEvent.RoundStart(round + 1));
                 }
 
-                if (!result.hasToolCalls()) {
-                    if (eventConsumer != null) {
-                        eventConsumer.accept(new AgentEvent.Complete(result));
-                    }
-                    return result;
-                }
-
-                List<ToolCall> toolCalls = result.toolCalls();
-                boolean parallel = toolCalls.size() > 1 && executor != null;
-                final Message assistantMessage = result.toMessage();
-
-                if (parallel) {
-                    // 并行执行多个工具调用，按源顺序组装结果。
-                    // 父上下文快照在子代理执行时只读；本轮历史消息不会再原地修改，复制一份避免并发读写歧义。
-                    final List<Message> parentSnapshot = List.copyOf(messages);
-                    // 边界2：worker 线程 ThreadLocal 是空的，捕获当前 llm span 的 context，
-                    // worker 里用 startChild 建 tool span，parent 指向本轮 llm span。
-                    final SpanContext llmCtx = tracer != null ? Tracer.current() : null;
-                    @SuppressWarnings("unchecked")
-                    CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
-                    for (int i = 0; i < toolCalls.size(); i++) {
-                        ToolCall tc = toolCalls.get(i);
+                // trace 启用时：每轮开一个 llm span，覆盖「LLM 调用 + 本轮所有工具执行」。
+                final Tracer.ScopedSpan llmSpan = tracer != null
+                        ? tracer.startSpan(SpanAttributes.SpanType.LLM, "llm") : null;
+                try {
+                    callback.onLlmStart(new LlmStartEvent(traceId, messages, tools));
+                    ChatResult result;
+                    long start = System.currentTimeMillis();
+                    try {
                         if (eventConsumer != null) {
-                            eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
-                        }
-                        final int idx = i;
-                        final ToolCall finalTc = tc;
-                        futures[i] = CompletableFuture.supplyAsync(
-                                () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId),
-                                executor)
-                                .whenComplete((output, err) -> {
-                                    if (eventConsumer != null) {
-                                        eventConsumer.accept(new AgentEvent.ToolEnd(finalTc.name(),
-                                                err != null ? "工具执行失败: " + err.getMessage() : output));
+                            result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
+                                if (chunk.hasContent()) {
+                                    eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
+                                }
+                                if (chunk.hasThinking()) {
+                                    eventConsumer.accept(new AgentEvent.ThinkingDelta(chunk.deltaThinking()));
+                                }
+                                if (chunk.hasToolCalls()) {
+                                    for (ChatChunk.DeltaToolCall dtc : chunk.deltaToolCalls()) {
+                                        eventConsumer.accept(new AgentEvent.ToolCallDelta(
+                                                dtc.index(), dtc.id(), dtc.name(), dtc.argumentsDelta()));
                                     }
-                                });
-                    }
-                    CompletableFuture.allOf(futures).join();
-                    // 按原始顺序追加结果到 messages
-                    for (int i = 0; i < toolCalls.size(); i++) {
-                        try {
-                            messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
-                        } catch (Exception e) {
-                            messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                                }
+                            });
+                        } else {
+                            result = llm.chat(messages, tools);
                         }
-                    }
-                } else {
-                    // 单个工具调用或未配置 executor，串行执行
-                    final List<Message> parentSnapshot = List.copyOf(messages);
-                    for (ToolCall tc : toolCalls) {
+                        long latencyMs = System.currentTimeMillis() - start;
+                        callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
+                    } catch (Exception e) {
+                        long latencyMs = System.currentTimeMillis() - start;
+                        callback.onLlmError(new LlmErrorEvent(traceId, messages, tools, e, latencyMs));
+                        if (llmSpan != null) {
+                            llmSpan.markError(e);
+                        }
                         if (eventConsumer != null) {
-                            eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                            eventConsumer.accept(new AgentEvent.AgentError(e));
                         }
-                        String output = executeWithToolSpan(tc, null, assistantMessage, parentSnapshot, traceId);
+                        throw e;
+                    }
+                    messages.add(result.toMessage());
+                    lastResult = result;
+
+                    if (eventConsumer != null) {
+                        eventConsumer.accept(new AgentEvent.RoundEnd(round + 1));
+                    }
+
+                    if (!result.hasToolCalls()) {
+                        // 准备 Complete:D3 强制等待所有后台完成或超时
+                        if (bgManager.hasRunning()) {
+                            JoinResult jr = bgManager.awaitAll(awaitTimeoutMs);
+                            if (jr.hasUnconsumed()) {
+                                messages.add(jr.mergedMessage());  // 注入后台结果,让 LLM 再看一轮
+                                continue;
+                            }
+                        }
+                        // 真正 Complete:无遗留后台
                         if (eventConsumer != null) {
-                            eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                            eventConsumer.accept(new AgentEvent.Complete(result));
                         }
-                        messages.add(Message.toolResult(tc.id(), output));
+                        return result;
+                    }
+
+                    List<ToolCall> toolCalls = result.toolCalls();
+                    boolean parallel = toolCalls.size() > 1 && executor != null;
+                    final Message assistantMessage = result.toMessage();
+                    final String runId = parentRunId;
+
+                    if (parallel) {
+                        // 并行执行多个工具调用，按源顺序组装结果。
+                        final List<Message> parentSnapshot = List.copyOf(messages);
+                        final SpanContext llmCtx = tracer != null ? Tracer.current() : null;
+                        @SuppressWarnings("unchecked")
+                        CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
+                        for (int i = 0; i < toolCalls.size(); i++) {
+                            ToolCall tc = toolCalls.get(i);
+                            if (eventConsumer != null) {
+                                eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                            }
+                            final ToolCall finalTc = tc;
+                            futures[i] = CompletableFuture.supplyAsync(
+                                    () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId, runId, bgManager),
+                                    executor)
+                                    .whenComplete((output, err) -> {
+                                        if (eventConsumer != null) {
+                                            eventConsumer.accept(new AgentEvent.ToolEnd(finalTc.name(),
+                                                    err != null ? "工具执行失败: " + err.getMessage() : output));
+                                        }
+                                    });
+                        }
+                        CompletableFuture.allOf(futures).join();
+                        for (int i = 0; i < toolCalls.size(); i++) {
+                            try {
+                                messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
+                            } catch (Exception e) {
+                                messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                            }
+                        }
+                    } else {
+                        // 单个工具调用或未配置 executor，串行执行
+                        final List<Message> parentSnapshot = List.copyOf(messages);
+                        for (ToolCall tc : toolCalls) {
+                            if (eventConsumer != null) {
+                                eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                            }
+                            String output = executeWithToolSpan(tc, null, assistantMessage, parentSnapshot, traceId, runId, bgManager);
+                            if (eventConsumer != null) {
+                                eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
+                            }
+                            messages.add(Message.toolResult(tc.id(), output));
+                        }
+                    }
+                } finally {
+                    if (llmSpan != null) {
+                        llmSpan.close();
                     }
                 }
-            } finally {
-                if (llmSpan != null) {
-                    llmSpan.close();
+
+                // D3 轮末 join:把已完成的后台结果注入(死循环防护:只注入已完成,不 spawn)
+                JoinResult jr = bgManager.joinCompleted();
+                if (!jr.isEmpty()) {
+                    messages.add(jr.mergedMessage());
                 }
             }
-        }
 
-        AgentException ex = new AgentException("超出最大迭代次数: " + maxIterations);
-        if (eventConsumer != null) {
-            eventConsumer.accept(new AgentEvent.AgentError(ex));
+            // 循环耗尽(hardLimit + graceTurns 用尽)
+            if (graceTurns == 0) {
+                // 0.9.0 硬截断语义:抛异常
+                AgentException ex = new AgentException("超出最大迭代次数: " + maxIterations);
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.AgentError(ex));
+                }
+                throw ex;
+            }
+            // graceful 硬中断:返回部分结果(不抛异常,D9)
+            // 背景任务如有遗留,先 awaitAll
+            if (bgManager.hasRunning()) {
+                JoinResult jr = bgManager.awaitAll(awaitTimeoutMs);
+                if (jr.hasUnconsumed() && lastResult != null) {
+                    // 已耗尽循环,无法再 continue;合并结果追加到最终文本
+                }
+            }
+            finalStatus = SubAgentStatus.ABORTED;
+            if (lastResult != null) {
+                if (eventConsumer != null) {
+                    eventConsumer.accept(new AgentEvent.Complete(lastResult));
+                }
+                return lastResult;
+            }
+            // 兜底
+            return new ChatResult("(已达最大轮数,无输出)", null, null, null, null);
+        } finally {
+            // D2:run() 结束清理后台任务
+            bgManager.close();
         }
-        throw ex;
     }
 
     /**
@@ -359,9 +465,10 @@ public class Agent {
      * trace 未启用时（tracer 为 null）直接执行，无任何 span 开销。
      */
     private String executeWithToolSpan(ToolCall tc, SpanContext parentCtx,
-                                       Message assistantMessage, List<Message> parentMessages, String traceId) {
+                                       Message assistantMessage, List<Message> parentMessages, String traceId,
+                                       String runId, BackgroundSubAgentManager bgManager) {
         if (tracer == null) {
-            return safeExecute(tc, assistantMessage, parentMessages, traceId);
+            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
         }
         Tracer.ScopedSpan toolSpan = parentCtx != null
                 ? tracer.startChild(parentCtx, SpanAttributes.SpanType.TOOL, tc.name())
@@ -370,7 +477,7 @@ public class Agent {
         // 错误状态由 RecordingCallback.onToolError 标记到 span；这里只兜底真正向上传播的异常
         // （如拦截器抛出的 AgentException）。
         try {
-            return safeExecute(tc, assistantMessage, parentMessages, traceId);
+            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
         } catch (RuntimeException e) {
             toolSpan.markError(e);
             throw e;
@@ -389,7 +496,8 @@ public class Agent {
      * <p>{@code parentMessages} 为父 Agent 当前轮消息链快照，仅在执行子代理工具时用于裁剪父上下文。
      * 普通工具路径不读取它，行为与改动前一致。</p>
      */
-    private String safeExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages, String traceId) {
+    private String safeExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages,
+                               String traceId, String runId, BackgroundSubAgentManager bgManager) {
         ToolCallContext ctx = new ToolCallContext(tc.id(), tc.name(), tc.arguments(), assistantMessage);
 
         // 1. callback: onToolStart（唯一触发点）
@@ -409,11 +517,11 @@ public class Agent {
                 }
             }
 
-            // 3. 实际执行（按工具类型三路分流）
+            // 3. 实际执行（按工具类型五路分流,瑕疵B）
             String result;
             boolean isError = false;
             try {
-                result = dispatchExecute(tc, assistantMessage, parentMessages, traceId);
+                result = dispatchExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
             } catch (Exception execEx) {
                 // 工具/子代理执行错误：软失败（现状语义），仍允许 after 拦截器处理错误结果
                 result = "工具执行失败: " + execEx.getMessage();
@@ -456,53 +564,132 @@ public class Agent {
     }
 
     /**
-     * 按工具类型分流执行：普通工具 / 独立子代理 tool / 通用 delegate tool。
-     * 普通工具走 {@link ToolRegistry#execute}；子代理工具走 {@link #executeSubAgentTool}。
+     * 按工具类型分流执行(五路分流,瑕疵B):
+     * <ol>
+     *   <li>独立子代理 tool:解析 run_in_background → 前台同步 / 后台 spawn</li>
+     *   <li>delegate tool:解析 agentName + run_in_background → 同上</li>
+     *   <li>get_subagent_result tool → bgManager.getResult(D3)</li>
+     *   <li>steer_subagent tool → bgManager.steer(D6)</li>
+     *   <li>普通工具 → ToolRegistry.execute(0.9.0 不变)</li>
+     * </ol>
      */
-    private String dispatchExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages, String traceId) {
-        // 独立子代理 tool：tool 名即子代理名
+    private String dispatchExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages,
+                                   String traceId, String runId, BackgroundSubAgentManager bgManager) {
+        // 1. 独立子代理 tool：tool 名即子代理名
         if (toolRegistry.hasSubAgent(tc.name())) {
             SubAgentDefinition def = toolRegistry.getSubAgent(tc.name());
             String task = parseTaskArg(tc.arguments(), def.name());
-            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId);
+            boolean background = parseBackgroundArg(tc.arguments());
+            if (background) {
+                return bgManager.spawn(def, task, assistantMessage, parentMessages, runId);
+            }
+            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId, runId, false);
         }
-        // 通用 delegate tool：先解析 agentName 再定位子代理
+        // 2. 通用 delegate tool：先解析 agentName 再定位子代理
         if (ToolRegistry.DELEGATE_TOOL_NAME.equals(tc.name())) {
             String agentName = parseAgentNameArg(tc.arguments());
             SubAgentDefinition def = toolRegistry.getSubAgent(agentName);
             String task = parseTaskArg(tc.arguments(), agentName);
-            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId);
+            boolean background = parseBackgroundArg(tc.arguments());
+            if (background) {
+                return bgManager.spawn(def, task, assistantMessage, parentMessages, runId);
+            }
+            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId, runId, false);
         }
-        // 普通工具：维持现状
+        // 3. get_subagent_result tool(D3)
+        if (ToolRegistry.GET_RESULT_TOOL_NAME.equals(tc.name())) {
+            String subAgentId = parseStringArg(tc.arguments(), "subagent_id", "get_subagent_result");
+            boolean wait = parseBooleanArg(tc.arguments(), "wait", false);
+            return bgManager.getResult(subAgentId, wait);
+        }
+        // 4. steer_subagent tool(D6)
+        if (ToolRegistry.STEER_TOOL_NAME.equals(tc.name())) {
+            String subAgentId = parseStringArg(tc.arguments(), "subagent_id", "steer_subagent");
+            String message = parseStringArg(tc.arguments(), "message", "steer_subagent");
+            return bgManager.steer(subAgentId, message);
+        }
+        // 5. 普通工具：维持现状
         return toolRegistry.execute(tc.name(), tc.arguments());
     }
 
     /**
-     * 执行子代理：构造裁剪上下文 → 动态构建子代理 Agent → 运行 → 返回最终文本。
+     * 执行前台子代理：构造裁剪上下文(或 resume)→ 动态构建子代理 Agent → 运行 → 返回最终文本。
      *
-     * <p>父/子 callback 与 trace 隔离：子代理使用独立 noop callback 与独立 trace，
-     * 父侧仅在外层把它视为一次普通工具调用（onToolStart/onToolComplete/onToolError 由 safeExecute 触发）。
-     * 子代理整体抛出的异常向上传播，由 safeExecute 捕获后软失败回灌 LLM。</p>
+     * <p>D7 resume:配置了 chatMemoryStore 且有历史 → 走 resume(不注入父上下文);
+     * 否则首次委派注入父上下文切片。</p>
+     * <p>D12 后台/前台 context 截断:前台全量,后台截断(此处 background=false 用全量)。</p>
+     * <p>D6 steer:前台不启用 enableSteer(无触发源)。</p>
+     *
+     * @param background 是否后台模式(影响 context 截断 + conversationId + steer 启用)
+     * @param recordId   后台子代理的 recordId(后台 conversationId 隔离用,瑕疵C);前台传 null
      */
     private String executeSubAgentTool(SubAgentDefinition def, String task,
-                                       Message assistantMessage, List<Message> parentMessages, String traceId) {
-        // 1. 裁剪父上下文（不含父 systemPrompt；排除 llmVisible=false）
-        ContextSelector selector = def.contextSelector() != null
-                ? def.contextSelector() : DEFAULT_CONTEXT_SELECTOR;
-        List<Message> parentSlice = selector.select(parentMessages, assistantMessage, task);
+                                       Message assistantMessage, List<Message> parentMessages,
+                                       String traceId, String runId, boolean background) {
+        SubAgentResult sr = runSubAgentInternal(def, task, assistantMessage, parentMessages,
+                runId, background, null);
+        return sr.displayText();
+    }
 
-        // 2. 组装子代理消息：子代理 systemPrompt + 父上下文切片 + 本次 task
+    /**
+     * 后台子代理执行入口(供 BackgroundSubAgentManager 调用,D6 启用 steer)。
+     *
+     * @param record 后台子代理记录(含 steer 队列 + recordId)
+     */
+    SubAgentResult executeBackgroundSubAgent(SubAgentRecord record, SubAgentDefinition def, String task,
+                                             Message assistantMessage, List<Message> parentMessages,
+                                             String runId) {
+        return runSubAgentInternal(def, task, assistantMessage, parentMessages, runId, true, record);
+    }
+
+    /**
+     * 子代理执行核心(D5 隔离 + D6 steer + D7 resume + D9 graceful + D12 截断 + 瑕疵C conversationId)。
+     */
+    private SubAgentResult runSubAgentInternal(SubAgentDefinition def, String task,
+                                               Message assistantMessage, List<Message> parentMessages,
+                                               String runId, boolean background, SubAgentRecord record) {
+        // D7 resume + 瑕疵C conversationId
+        com.non.chain.memory.ChatMemoryStore store = def.chatMemoryStore();
+        String conversationId = background
+                ? runId + ":" + def.name() + ":" + (record != null ? record.id() : "noid")
+                : runId + ":" + def.name();
+        boolean isResume = false;
+        List<Message> history = null;
+        if (store != null) {
+            try {
+                history = store.getMessages(conversationId);
+                isResume = history != null && !history.isEmpty();
+            } catch (Exception ignored) {
+                isResume = false;
+            }
+        }
+
+        // 1. 组装子代理消息
         List<Message> childMessages = new ArrayList<>();
         childMessages.add(Message.system(def.systemPrompt()));
-        childMessages.addAll(parentSlice);
+        if (isResume) {
+            // resume:不注入父上下文(D12),用自己的历史
+            childMessages.addAll(history);
+        } else {
+            // 首次委派:注入父上下文切片
+            ContextSelector selector = def.contextSelector() != null
+                    ? def.contextSelector()
+                    : (background ? BACKGROUND_CONTEXT_SELECTOR : DEFAULT_CONTEXT_SELECTOR);
+            List<Message> parentSlice = selector.select(parentMessages, assistantMessage, task);
+            childMessages.addAll(parentSlice);
+        }
         childMessages.add(Message.user(task));
 
-        // 3. 动态构造子代理：默认继承父 LLM，独立工具集/拦截器/maxIterations，隔离 callback 与 trace
+        // 2. 动态构造子代理
         LLM childLlm = def.llmOverride() != null ? def.llmOverride() : this.llm;
         ToolRegistry childRegistry = def.toolRegistry() != null ? def.toolRegistry() : new ToolRegistry();
         Agent.Builder childBuilder = Agent.builder(childLlm, childRegistry)
                 .systemPrompt(def.systemPrompt())
-                .callback(ChainCallbackUtil.noop()); // 父/子【用户面】callback 隔离（既有承诺不变）
+                .graceTurns(DEFAULT_GRACE_TURNS)   // D9 子代理统一 graceful
+                .callback(ChainCallbackUtil.noop()); // 父/子【用户面】callback 隔离(既有承诺不变)
+        if (background) {
+            childBuilder.enableSteer();  // D6 后台子代理启用 steer
+        }
         if (def.maxIterations() != null) {
             childBuilder.maxIterations(def.maxIterations());
         }
@@ -512,23 +699,48 @@ public class Agent {
         for (AfterToolCall a : def.afterInterceptors()) {
             childBuilder.addAfterToolCall(a);
         }
-        // 边界1（SubAgent 全树下钻）：录制层正交于用户面 callback——
-        // 子代理用户 callback 仍隔离（noop），但【录制 callback】不隔离：
-        // 注入父的 tracer + 当前 current SpanContext（即父委派 tool span 的 ctx），
-        // 子代理用自己的 RecordingCallback 实例，内部 LLM/Tool span 挂到父委派 tool span 下，进同一棵树。
-        SpanContext subParentCtx = null;
+        // 边界1(SubAgent 全树下钻):录制层不隔离,注入父 tracer + current SpanContext
         if (tracer != null) {
-            subParentCtx = Tracer.current();
+            SpanContext subParentCtx = Tracer.current();
             if (subParentCtx != null) {
-                childBuilder.trace(tracer.store())
-                        .parentSpanContext(subParentCtx);
+                childBuilder.trace(tracer.store()).parentSpanContext(subParentCtx);
             }
         }
         Agent child = childBuilder.build();
 
-        // 4. 子代理用自己的 trace 运行（run(List<Message>) 内部会生成独立 traceId 并在 finally 清理）
+        // D6 后台模式:把 child 注册到 record(steer 桥接)+ drain 已累积的 steer
+        if (background && record != null) {
+            record.childAgent(child);
+            // drain spawn 前已注入的 steer 到 child 内部队列
+            String s;
+            while ((s = record.pendingSteers().poll()) != null) {
+                child.steer(s);
+            }
+            // 运行中后续的 steer 通过 bgManager.steer → child.steer 直接桥接(见 record.childAgent)
+        }
+
+        // 3. 运行子代理
         ChatResult childResult = child.run(childMessages);
-        return childResult.content() != null ? childResult.content() : "";
+        String content = childResult.content() != null ? childResult.content() : "";
+
+        // 4. D7 resume:存回历史(去掉 systemPrompt)
+        if (store != null) {
+            try {
+                List<Message> toStore = new ArrayList<>();
+                for (Message m : childMessages) {
+                    if (!"system".equals(m.role())) {
+                        toStore.add(m);
+                    }
+                }
+                store.updateMessages(conversationId, toStore);
+            } catch (Exception ignored) {
+                // 存储失败不影响主流程
+            }
+        }
+
+        // 5. 推断 status(瑕疵A:子代理内部 graceful 已处理,这里从结果推断)
+        // 子代理 run 不抛异常(graceful),content 即最终文本。status 默认 COMPLETED。
+        return new SubAgentResult(content, SubAgentStatus.COMPLETED);
     }
 
     /** 子代理/delegate 工具共享的 JSON 参数解析器（与 ToolRegistry.parseArguments 同语义）。 */
@@ -590,6 +802,8 @@ public class Agent {
         } else {
             tools.addAll(toolRegistry.getDirectSubAgentTools());
         }
+        // D3/D6:有子代理时额外暴露控制工具
+        tools.addAll(toolRegistry.getSubAgentControlTools());
         return tools;
     }
 
@@ -604,18 +818,73 @@ public class Agent {
         return visible;
     };
 
+    /** D12 后台默认截断:只取最近 4 条可见消息(避免并行后台 token 爆炸) */
+    private static final int BACKGROUND_CONTEXT_WINDOW = 4;
+    private static final ContextSelector BACKGROUND_CONTEXT_SELECTOR = (parentMessages, assistantMessage, task) -> {
+        List<Message> visible = new ArrayList<>();
+        for (Message m : parentMessages) {
+            if (m.llmVisible()) {
+                visible.add(m);
+            }
+        }
+        int n = Math.min(visible.size(), BACKGROUND_CONTEXT_WINDOW);
+        return new ArrayList<>(visible.subList(visible.size() - n, visible.size()));
+    };
+
+    /** D11 从 tool arguments 解析 run_in_background(默认 false) */
+    private boolean parseBackgroundArg(String arguments) {
+        try {
+            Map<String, Object> map = parseArgsMap(arguments, "子代理调用");
+            Object bg = map.get("run_in_background");
+            return bg != null && Boolean.parseBoolean(bg.toString());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** 解析 String 参数 */
+    private String parseStringArg(String arguments, String key, String toolName) {
+        Map<String, Object> map = parseArgsMap(arguments, toolName);
+        Object val = map.get(key);
+        if (val == null || val.toString().isBlank()) {
+            throw new IllegalArgumentException(toolName + " 缺少 " + key + " 参数");
+        }
+        return val.toString();
+    }
+
+    /** 解析 boolean 参数(带默认值) */
+    private boolean parseBooleanArg(String arguments, String key, boolean defaultValue) {
+        try {
+            Map<String, Object> map = parseArgsMap(arguments, key);
+            Object val = map.get(key);
+            return val != null ? Boolean.parseBoolean(val.toString()) : defaultValue;
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
     public static class Builder {
 
         private final LLM llm;
         private final ToolRegistry toolRegistry;
         private String systemPrompt;
         private int maxIterations = DEFAULT_MAX_ITERATIONS;
+        private int graceTurns = DEFAULT_GRACE_TURNS;   // D9:默认 3;0 = 禁用 graceful(回退0.9.0硬截断抛异常)
         private ChainCallback callback;
         private ChatMemory memory;
         private Executor executor = ForkJoinPool.commonPool();
         private SubAgentExposureMode subAgentExposureMode = SubAgentExposureMode.DIRECT;
         private final List<BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<AfterToolCall> afterInterceptors = new ArrayList<>();
+
+        // ---- 后台子代理配置(D4)----
+        private ExecutorService backgroundExecutor;       // 默认 null → run() 时按 maxBackgroundRunning 创建
+        private int maxBackgroundRunning = 4;             // D4 运行上限
+        private Integer spawnCeiling;                     // D4 熔断:null = 自适应(maxIterations × maxRunning × 2)
+        private long awaitTimeoutMs = 60_000;             // D3 Complete 前等待超时
+
+        // ---- steer(D6):null = 未启用(顶层/前台 Agent),子代理构造时 enableSteer ----
+        private BlockingQueue<String> pendingSteers;
 
         // ---- trace（构建期决定，运行期生效） ----
         private TraceStore traceStore;
@@ -746,6 +1015,60 @@ public class Agent {
          */
         public Builder subAgentExposureMode(SubAgentExposureMode mode) {
             this.subAgentExposureMode = mode == null ? SubAgentExposureMode.DIRECT : mode;
+            return this;
+        }
+
+        /**
+         * 设置 graceful max turns 的 grace 阶段轮数(D9)。
+         *
+         * <ul>
+         *   <li>默认 3:超 maxIterations 后注入"收尾"消息,给最多 graceTurns 轮收尾</li>
+         *   <li>0:禁用 graceful,回退 0.9.0 硬截断(超 maxIterations 抛 AgentException)</li>
+         * </ul>
+         * <p><b>破坏性变更(§9.2)</b>:本次顶层和子代理统一走 graceful。设为 0 可恢复 0.9.0 抛异常语义。</p>
+         */
+        public Builder graceTurns(int graceTurns) {
+            this.graceTurns = Math.max(0, graceTurns);
+            return this;
+        }
+
+        /**
+         * 后台子代理线程池(D4)。默认 null → run() 时按 {@link #maxBackgroundRunning} 创建固定池。
+         */
+        public Builder backgroundExecutor(ExecutorService exec) {
+            this.backgroundExecutor = exec;
+            return this;
+        }
+
+        /**
+         * 后台子代理运行上限(D4),默认 4。超出的 spawn 进 FIFO 队列。
+         */
+        public Builder maxBackgroundRunning(int n) {
+            this.maxBackgroundRunning = Math.max(1, n);
+            return this;
+        }
+
+        /**
+         * 后台子代理总派发熔断(D4)。默认 null = 自适应(maxIterations × maxRunning × 2)。
+         */
+        public Builder spawnCeiling(int ceiling) {
+            this.spawnCeiling = Math.max(1, ceiling);
+            return this;
+        }
+
+        /**
+         * Complete 前等待后台完成的全局超时(D3),默认 60 秒。
+         */
+        public Builder awaitTimeoutMs(long ms) {
+            this.awaitTimeoutMs = Math.max(1000, ms);
+            return this;
+        }
+
+        /**
+         * 启用 steer 队列(D6)。仅子代理构造时框架内部调用,顶层/前台 Agent 不启用。
+         */
+        Builder enableSteer() {
+            this.pendingSteers = new java.util.concurrent.LinkedBlockingQueue<>();
             return this;
         }
 

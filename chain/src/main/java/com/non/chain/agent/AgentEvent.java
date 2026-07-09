@@ -185,4 +185,105 @@ public interface AgentEvent {
             return result;
         }
     }
+
+    // ---- SubAgent 生命周期事件(D5):后台子代理的状态转换,内部事件仍隔离 ----
+
+    /** 后台子代理被派发 */
+    class SubAgentSpawned implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+        private final String task;
+        private final boolean background;
+
+        public SubAgentSpawned(String subAgentId, String name, String task, boolean background) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+            this.task = task;
+            this.background = background;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+        public String task() { return task; }
+        public boolean background() { return background; }
+    }
+
+    /** 后台子代理从队列被调度执行 */
+    class SubAgentStarted implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+
+        public SubAgentStarted(String subAgentId, String name) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+    }
+
+    /** 后台子代理正常完成(含 STEERED/ABORTED) */
+    class SubAgentCompleted implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+        private final SubAgentStatus status;
+        private final String resultPreview;
+
+        public SubAgentCompleted(String subAgentId, String name, SubAgentStatus status, String resultPreview) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+            this.status = status;
+            this.resultPreview = resultPreview;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+        public SubAgentStatus status() { return status; }
+        public String resultPreview() { return resultPreview; }
+    }
+
+    /** 后台子代理执行失败 */
+    class SubAgentFailed implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+        private final Throwable error;
+
+        public SubAgentFailed(String subAgentId, String name, Throwable error) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+            this.error = error;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+        public Throwable error() { return error; }
+    }
+
+    /** 后台子代理被 steer(D6) */
+    class SubAgentSteered implements AgentEvent {
+        private final String subAgentId;
+        private final String message;
+
+        public SubAgentSteered(String subAgentId, String message) {
+            this.subAgentId = subAgentId;
+            this.message = message;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String message() { return message; }
+    }
+
+    /** 后台子代理被硬中断(D9 aborted) */
+    class SubAgentAborted implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+
+        public SubAgentAborted(String subAgentId, String name) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+    }
 }
