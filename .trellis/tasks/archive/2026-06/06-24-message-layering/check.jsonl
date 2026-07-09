@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查 Message 新字段为 private final、访问器无 get 前缀、note() 为静态工厂；确认无 getter/setter、无可变状态"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "核查 AbstractOpenAILLM 过滤分支未引入 logger 或 System.out —— 库代码必须保持零日志依赖"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "核查 chat_memory_message 表结构未改、三种 store 实现未因新字段而改动，新字段仅由 MessageSerializer 承载"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "核查 default:throw 保留、消息为中文描述；核查序列化/裁剪异常仍用 RuntimeException 包装 + 中文描述"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "核查 llmVisible/kind 在 序列化往返、边界过滤、裁剪预算 三处口径一致；核查 note role 与 tool 配对扫描的跨层不冲突"}

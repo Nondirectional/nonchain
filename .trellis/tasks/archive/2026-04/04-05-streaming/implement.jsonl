@@ -1,0 +1,5 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": "chain/src/main/java/com/non/chain/provider/LLM.java", "reason": "LLM interface to extend with streamChat methods"}
+{"file": "chain/src/main/java/com/non/chain/provider/DashscopeLLM.java", "reason": "Reference implementation for streaming"}
+{"file": "chain/src/main/java/com/non/chain/ChatResult.java", "reason": "ChatResult model - streaming returns same type"}

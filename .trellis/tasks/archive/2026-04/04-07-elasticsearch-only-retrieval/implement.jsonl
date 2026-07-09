@@ -1,0 +1,5 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "不可变对象、Builder、公共 API 约束"}
+{"file": "chain-elasticsearch/src/main/java/com/non/chain/knowledge/elasticsearch/ElasticsearchSearchSupport.java", "reason": "ES 查询构造、过滤与 debug 响应复用点"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/SearchRequest.java", "reason": "统一检索请求模型既有实现模式"}

@@ -1,0 +1,29 @@
+{
+  "id": "agent-control-flow-extensibility",
+  "name": "agent-control-flow-extensibility",
+  "title": "Agent 控制流可扩展性（借鉴 pi-agent-core）",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "non",
+  "assignee": "non",
+  "createdAt": "2026-06-24",
+  "completedAt": "2026-06-25",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "06-24-tool-interceptor",
+    "06-24-message-layering"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

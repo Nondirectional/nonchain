@@ -1,0 +1,11 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/DocumentSplitter.java", "reason": "Core interface to implement"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/TextChunk.java", "reason": "Output data model"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/ContentMeasure.java", "reason": "Size measurement interface"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/TokenMeasure.java", "reason": "Token counting implementation"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/RecursiveCharacterSplitter.java", "reason": "Pre-splitter reference"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/SplitterSupport.java", "reason": "Atomic element handling"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/CompositeDocumentSplitter.java", "reason": "Two-stage splitter pattern reference"}
+{"file": "chain/src/main/java/com/non/chain/provider/LLM.java", "reason": "LLM interface"}
+{"file": "chain/src/main/java/com/non/chain/provider/DashscopeLLM.java", "reason": "LLM implementation reference"}

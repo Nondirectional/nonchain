@@ -1,0 +1,6 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/DocumentSplitter.java", "reason": "Verify interface compliance"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/TextChunk.java", "reason": "Verify output model"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/RecursiveCharacterSplitter.java", "reason": "Pattern reference"}
+{"file": "chain-document/src/main/java/com/non/chain/document/splitter/SplitterSupport.java", "reason": "Atomic element handling"}

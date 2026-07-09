@@ -1,0 +1,4 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "值对象与接口设计规范"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "模块拆分与目录布局"}

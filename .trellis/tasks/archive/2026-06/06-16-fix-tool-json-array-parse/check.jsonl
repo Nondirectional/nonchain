@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "校验值对象不可变、Builder 模式、无 getter 前缀、测试只测公开 API、@ToolParam API 零变更"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "校验异常类型为 IllegalArgumentException + 中文消息 + 不静默吞错"}

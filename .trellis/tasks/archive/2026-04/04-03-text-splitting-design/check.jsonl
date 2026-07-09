@@ -1,0 +1,7 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "检查模块边界是否正确"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查不可变性、Builder 和公开 API 风格"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查参数校验和异常消息"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查是否重复实现通用逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查跨模块数据契约是否一致"}

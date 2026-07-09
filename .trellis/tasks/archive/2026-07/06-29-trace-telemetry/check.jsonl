@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Primary check target: required/forbidden patterns, immutability of Span/Trace/SpanContext, and correct Builder usage on Agent/Graph."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify the failure path keeps the original exception type/stack and that the runtimeId is exposed only via a suppressed marker + extraction API, not a wrapping exception."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify the new trace/ package lives in the correct location and that directory-structure.md + index.md were updated to document it."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "Verify no logging framework was introduced and that recording-layer exceptions do not leak into the main execution flow."}
+{"file": ".trellis/spec/backend/tool-function-calling.md", "reason": "Verify tool-call handling correctness in RecordingCallback and that parallel tools produce exactly one tool span each with the right parent."}

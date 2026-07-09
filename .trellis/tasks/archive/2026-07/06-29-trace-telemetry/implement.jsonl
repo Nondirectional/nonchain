@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend overview (Java 11+ library, no DB/web framework) + pre-dev checklist; read first before writing any chain code."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Placement of the new trace/ package and its classes under chain/src/main/java/com/non/chain/trace/; Step 10 also requires updating this file to document trace/."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Span/Trace/SpanContext are immutable value objects; Agent.builder().trace() / Graph.builder(name).traceStore() follow the Builder pattern; forbidden-patterns list must be respected."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Decision 9 failure path: preserve original exception type/semantics, attach a suppressed trace marker carrying runtimeId, expose extraction API — must follow fail-fast + exception conventions."}
+{"file": ".trellis/spec/backend/tool-function-calling.md", "reason": "RecordingCallback consumes ToolStartEvent/ToolCompleteEvent (toolCall/result shapes) and the parallel-tool boundary (Agent.java supplyAsync) — tool call data contracts apply."}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "No logging framework allowed; examples use println only; recording layer failures must stay isolated from the main flow (silently swallowed)."}

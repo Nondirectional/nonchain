@@ -45,6 +45,5 @@ build/
 .agents/
 .pi/
 .codex/
-.trellis/
 .zcode/
 AGENTS.md

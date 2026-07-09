@@ -1,0 +1,44 @@
+{
+  "id": "vllm-provider",
+  "name": "vllm-provider",
+  "title": "brainstorm: 新增 OpenAI 兼容 Provider 支持 vllm 本地模型",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "priority": "P2",
+  "creator": "non",
+  "assignee": "non",
+  "createdAt": "2026-04-15",
+  "completedAt": "2026-04-15",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "current_phase": 0,
+  "next_action": [
+    {
+      "phase": 1,
+      "action": "implement"
+    },
+    {
+      "phase": 2,
+      "action": "check"
+    },
+    {
+      "phase": 3,
+      "action": "finish"
+    },
+    {
+      "phase": 4,
+      "action": "create-pr"
+    }
+  ],
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

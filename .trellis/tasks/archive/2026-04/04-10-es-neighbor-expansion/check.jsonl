@@ -1,0 +1,5 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check-backend.md", "reason": "Backend check spec"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查新增值对象、Builder、不变性和异常风格"}
+{"file": "chain/src/test/java/com/non/chain/knowledge/SearchRequestTest.java", "reason": "参考现有 knowledge 模块测试风格"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查参数校验和中文错误信息"}

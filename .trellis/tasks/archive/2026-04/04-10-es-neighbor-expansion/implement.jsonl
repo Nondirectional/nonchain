@@ -1,0 +1,8 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "新增请求/响应值对象与 Builder 模式"}
+{"file": "chain-elasticsearch/src/main/java/com/non/chain/knowledge/elasticsearch/ElasticsearchKnowledgeStore.java", "reason": "在现有 Elasticsearch store 中新增上下文扩展实现"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "参数校验和运行时异常语义"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/SearchRequest.java", "reason": "参考现有 knowledge 请求对象的 Builder 与校验风格"}
+{"file": "chain/src/main/java/com/non/chain/knowledge/RetrievalResponse.java", "reason": "参考现有响应对象的不可变返回模式"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新增 knowledge 模型与接口，遵循后端目录和命名约定"}

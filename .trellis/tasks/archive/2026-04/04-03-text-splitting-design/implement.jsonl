@@ -1,0 +1,7 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "不可变对象、Builder 和公共 API 约束"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "参数校验和中文异常消息规范"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新接口和实现的模块放置规则"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "避免重复表格序列化和 chunk 元数据逻辑"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "chain 与 chain-document 之间的接口契约和 metadata 边界"}

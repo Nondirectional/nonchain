@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Message 是不可变值对象，新增 llmVisible/kind 字段必须遵循 private final + 构造注入 + 无前缀访问器（llmVisible()/kind()）规范；note() 工厂需符合静态工厂约定"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "项目无日志框架，库代码禁用 logger/System.out；R2 边界过滤必须静默，default:throw 是唯一可观测信号 —— 设计 §4.3 已据此修正"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "持久化在 ChatMemoryStore 抽象后，Message 经 MessageSerializer 与 content_json 存取；新字段走序列化器扩展，不改 store 实现、不碰 schema，符合「新存储后端」一节描述的既有分层"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "保留 buildMessageListParams 的 default:throw IllegalArgumentException 作 fail-safe，符合「fail fast with descriptive Chinese messages」与现有不支持的消息角色错误模式一致"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务横跨 Message 模型 → 序列化 → 存储 → provider 边界 → 裁剪 五层，llmVisible/kind 标记必须在各层一致传递；裁剪预算口径与 tool 配对保护是典型跨层数据流契约"}
