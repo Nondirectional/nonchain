@@ -40,8 +40,8 @@ src/main/java/com/non/chain/
 │   ├── ToolParam.java        # Annotation: marks tool method parameters
 │   └── ToolRegistry.java     # Central registry: annotation scan + fluent API + SubAgent registration
 ├── agent/
-│   ├── Agent.java            # LLM + tool loop executor (Builder pattern, memory/callback/streaming/interceptors)
-│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/...)
+│   ├── Agent.java            # LLM + tool loop executor (Builder pattern, memory/callback/streaming/interceptors/graceful/steer/bgSubAgent)
+│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/... + SubAgent lifecycle events)
 │   ├── AgentException.java   # Unchecked exception for agent loop failures
 │   ├── BeforeToolCall.java   # Interceptor: before tool execution (can block)
 │   ├── AfterToolCall.java    # Interceptor: after tool execution (can rewrite result)
@@ -49,8 +49,13 @@ src/main/java/com/non/chain/
 │   ├── AfterResult.java      # after interceptor return type (keep/rewrite)
 │   ├── ToolCallContext.java  # Immutable interceptor input context
 │   ├── SubAgentExposureMode.java  # Enum: DIRECT (default, one tool per sub-agent) / DELEGATE (single delegate tool)
-│   ├── SubAgentDefinition.java    # Immutable value object: sub-agent config (name/desc/systemPrompt/llm/tools/...)
-│   └── ContextSelector.java       # Functional interface: parent-context pruning strategy for sub-agents
+│   ├── SubAgentDefinition.java    # Immutable value object: sub-agent config (name/desc/systemPrompt/llm/tools/chatMemoryStore/...)
+│   ├── ContextSelector.java       # Functional interface: parent-context pruning strategy for sub-agents
+│   ├── SubAgentStatus.java        # Enum: RUNNING/COMPLETED/STEERED/ABORTED/FAILED (graceful max turns)
+│   ├── SubAgentResult.java        # Sub-agent run result: content + status + displayText() (status note)
+│   ├── SubAgentRecord.java        # Background sub-agent runtime state: future/status/result/steers/childAgent
+│   ├── BackgroundSubAgentManager.java  # Background orchestration: thread pool/queue/circuit-breaker/join/awaitAll (scoped to one run())
+│   └── JoinResult.java            # Round-end join product: mergedMessage() from completed background results
 ├── flow/
 │   ├── Node.java             # Workflow node: wraps a Function<State, State>
 │   ├── Edge.java             # Workflow edge: unconditional or conditional routing
@@ -93,10 +98,12 @@ Two supported approaches:
 ### Registering a delegated sub-agent (SubAgent)
 Delegated sub-agents are registered in `ToolRegistry`, exposed by `Agent.Builder`:
 1. Call `registry.registerSubAgent(name, description)` → declarative `SubAgentRegistration` Builder (`description` for LLM schema, `systemPrompt` for sub-agent role — both required, defined separately)
-2. Configure optional fields: `.toolRegistry(childTools)` (nullable = no-tool sub-agent), `.llm(override)` (default = inherit parent LLM), `.maxIterations(n)`, `.contextSelector(strategy)`, `.addBeforeToolCall/.addAfterToolCall` (scoped to sub-agent internals)
+2. Configure optional fields: `.toolRegistry(childTools)` (nullable = no-tool sub-agent; **D10: must not itself contain subAgents or `build()` throws**), `.llm(override)` (default = inherit parent LLM), `.maxIterations(n)`, `.contextSelector(strategy)`, `.chatMemoryStore(store)` (D7: null = stateless 0.9.x; non-null enables resume), `.addBeforeToolCall/.addAfterToolCall` (scoped to sub-agent internals)
 3. `.build()` writes the `SubAgentDefinition` into `ToolRegistry`
 4. Parent `Agent` picks exposure mode via `.subAgentExposureMode(DIRECT|DELEGATE)` (build-time fixed, default `DIRECT`)
 5. Only runs inside the `Agent` auto-loop; hand-written `registry.execute("subAgent", ...)` fails fast
+6. Background/background-parallel: parent LLM passes `run_in_background=true` (D11 call-level); background orchestration via `BackgroundSubAgentManager` (scoped to one `run()`, independent thread pool, max-running + circuit-breaker). `get_subagent_result` / `steer_subagent` tools auto-exposed when sub-agents exist.
+7. Parent `Agent` graceful: `.graceTurns(n)` (default 3; **0 = fallback to 0.9.x hard-cutoff throwing `AgentException`**). `.graceTurns(0)` is the only path that throws on maxIterations exceeded.
 
 ### Adding a new workflow pattern
 1. Define `Node` instances with `Function<State, State>` processors

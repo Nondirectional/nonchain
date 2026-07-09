@@ -178,11 +178,13 @@ private Map<String, Object> parseArguments(String json) {
 
 **Contracts to preserve**:
 - `registerSubAgent` 重名（与普通工具或已注册子代理同名）→ `IllegalStateException`「已存在同名工具或子代理」；`build()` 未设 `systemPrompt` → `IllegalStateException`。
-- 独立子代理 tool schema 仅含必填 `task`；delegate tool 的 `agentName` 是已注册子代理名 enum（用 `Tool.Builder.addProperty(..., enumValues)`，复用 layer-1 schema 契约，无 parser 改动）。
-- **执行分流在 `Agent.safeExecute` 下游**：`dispatchExecute` 三路——普通工具走 `ToolRegistry.execute`；独立子代理 tool（`hasSubAgent(name)`）与 delegate tool（`name == DELEGATE_TOOL_NAME`）走 `executeSubAgentTool`。
-- **`execute` fail-fast**：`ToolRegistry.execute` 命中子代理名或 delegate tool 名 → `IllegalStateException`「仅支持在 Agent 自动循环中执行」。手写循环不提供父上下文/cb 隔离，禁止降级执行。
-- **`safeExecute` 签名带父消息快照**：`safeExecute(tc, assistantMessage, parentMessages, traceId)`，串/并行路径都传 `List.copyOf(messages)`（只读快照，避免并发读写歧义）。普通工具路径不读 `parentMessages`，行为不变。
-- 子代理/delegate 的 `task`/`agentName` JSON 解析在 `Agent` 内用共享 `parseArgsMap`（与 `ToolRegistry.parseArguments` 同语义），不重复造 parser。
+- 独立子代理 tool schema 含必填 `task` + 可选 `run_in_background`（D11 调用级前后台）；delegate tool 的 `agentName` 是已注册子代理名 enum，也含可选 `run_in_background`（用 `Tool.Builder.addProperty(..., enumValues)`，复用 layer-1 schema 契约，无 parser 改动）。
+- **D10 嵌套 fail-fast**：子代理的 `toolRegistry` 注册了 subAgent → `build()` 抛 `IllegalStateException`「子代理不支持嵌套委派」。仅一层委派。
+- **执行分流在 `Agent.safeExecute` 下游**：`dispatchExecute` **五路**——① 独立子代理 tool（`hasSubAgent(name)`，解析 `run_in_background`：true→后台 spawn，false→前台同步）② delegate tool（同上分流）③ `get_subagent_result` tool → `bgManager.getResult` ④ `steer_subagent` tool → `bgManager.steer` ⑤ 普通工具走 `ToolRegistry.execute`。
+- **D3/D6 控制工具暴露**：有已注册子代理时，`getSubAgentControlTools()` 额外暴露 `get_subagent_result` + `steer_subagent`；无子代理时不暴露。两者 fail-fast 同子代理名（`ToolRegistry.execute` 命中 → `IllegalStateException`「仅支持在 Agent 自动循环中执行」）。
+- **`execute` fail-fast**：`ToolRegistry.execute` 命中子代理名、delegate tool、`get_subagent_result` 或 `steer_subagent` → `IllegalStateException`「仅支持在 Agent 自动循环中执行」。手写循环不提供父上下文/cb 隔离，禁止降级执行。
+- **`safeExecute` 签名带父消息快照 + runId + bgManager**：`safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager)`，串/并行路径都传 `List.copyOf(messages)`（只读快照）。普通工具路径不读 `parentMessages`，行为不变。
+- 子代理/delegate 的 `task`/`agentName`/`run_in_background` JSON 解析在 `Agent` 内用共享 `parseArgsMap`（与 `ToolRegistry.parseArguments` 同语义），不重复造 parser。
 
 ## Convention: SubAgent Runtime Isolation (context / callback / error)
 
@@ -204,12 +206,50 @@ private Map<String, Object> parseArguments(String json) {
 **Error contracts**:
 - 子代理整体抛异常 → 由 `safeExecute` 捕获 → 软失败（与普通工具一致）：外层记 `ToolErrorEvent`，错误文本回灌父 Agent，父循环继续。
 - 子代理内部工具失败 → 子代理自身按现有 `Agent` 语义软失败处理，产出文本结果。
-- 子代理 maxIterations 超限 → `AgentException` 向上传播，走上一条整体失败路径。
+- ⚠️ **maxIterations graceful（破坏性变更）**：顶层 Agent 和子代理统一走 graceful——超 `maxIterations` 后注入「立即收尾」消息，给 `graceTurns`（默认 3）轮收尾；grace 内完成标 `STEERED`，grace 也超则硬中断返回部分结果标 `ABORTED`，**不抛异常**。回退 0.9.x 硬截断：`.graceTurns(0)` 恢复抛 `AgentException` 语义。
 
 **Scope contracts**:
-- 仅一层委派，子代理不能再委派（递归委派留给后续）。
+- 仅一层委派，子代理不能再委派（D10 fail-fast 见上一节）。
 - 仅支持 `Agent` 自动循环；手写循环误用 → fail-fast（见上一节）。
 - 同轮多个子代理可并行（沿用现有多工具并行），结果按原始 tool call 顺序回灌。
+
+## Convention: SubAgent Background Execution & Orchestration (前台/后台并行)
+
+**What**: 引入后台子代理——`run_in_background=true` 时 spawn 后立即返回，父代理不阻塞、继续推理；后台子代理由 `BackgroundSubAgentManager` 编排（独立线程池 + 运行上限 + 熔断 + 完成队列）。生命周期绑定单次父 `run()` 内（D2：`run()` 结束 `close()` 取消未完成任务）。
+
+**Why**: 0.9.x 的并行是「同轮多 toolCall 不同线程跑但 `allOf().join()` 同步阻塞等齐」；后台模式让父代理能「派出去自己继续推理」，配合自动 join 消费结果。
+
+**Background manager contracts**:
+- **独立线程池**：`Executors.newFixedThreadPool(maxBackgroundRunning)`，不复用父 `executor`（ForkJoinPool 不适合阻塞 IO）。Builder 可 `.backgroundExecutor(...)` 覆盖。
+- **运行上限（默认 4）+ FIFO 队列**：`running.size() < maxRunning` 立即提交，否则入队；任务完成 drain。
+- **总派发熔断（自适应）**：`spawnCeiling = maxIterations × maxBackgroundRunning × 2`（防 LLM 失控狂 spawn），可 `.spawnCeiling(...)` 显式覆盖；超限拒绝 spawn 返回错误文本。
+- **死循环防护三重保证**：① `joinCompleted()` 只注入已完成结果，不 spawn 新任务、不强制 `continue`；② spawn 受熔断；③ `awaitAll(timeout)` 有全局超时（默认 60s），超时取消未完成的。
+
+**Result consumption contracts（D3 自动 join + 主动拉取）**:
+- **轮末自动 join**：每轮 tool 执行后、下一轮 LLM 推理前，`bgManager.joinCompleted()` 把已完成未消费结果**合并成一条 user 消息**注入（D13，降低膨胀）。
+- **Complete 前强制等待**：`!result.hasToolCalls()` 分支调 `bgManager.awaitAll(timeout)`；有未消费则注入 + `continue`（让 LLM 再看一轮），无则真正 Complete。
+- **`get_subagent_result` 工具**：父 LLM 主动查询/等待（`wait:true` 阻塞，但有 `awaitTimeoutMs` 超时保护——瑕疵E）。返回完整结果 + 状态。
+
+**Steer contracts（D6 仅后台）**:
+- `steer(message)` 仅后台子代理实例支持（`pendingSteers` 非 null）；顶层/前台 Agent 调用抛 `UnsupportedOperationException`。
+- steer 消息在子代理**下一轮 LLM 调用前**作为 user message 加入（非即时中断）。
+- `steer_subagent` 工具 → `bgManager.steer` → 通过 `record.childAgent().steer()` 桥接到运行中子代理的内部队列。
+
+**Resume contracts（D7 opt-in 有状态）**:
+- `SubAgentDefinition.chatMemoryStore` 默认 null = 无状态（0.9.x 语义）；配置后子代理有状态，复用现有 `ChatMemoryStore` SPI。
+- 首次委派：注入父上下文切片；resume（历史非空）：**不注入父上下文**（D12），用 `[systemPrompt] + history + [user(task)]`。
+- **conversationId 区分并发（瑕疵C）**：前台 = `<runId>:<subAgentName>`（连续 resume）；后台 = `<runId>:<subAgentName>:<recordId>`（并发隔离）。
+
+**Context pruning（D12 前后台差异）**:
+- 前台默认 = `DEFAULT_CONTEXT_SELECTOR`（全量可见，0.9.x 不变）。
+- 后台默认 = `BACKGROUND_CONTEXT_SELECTOR`（最近 4 条可见消息，避免并行 token 爆炸）。
+- 子代理注册的 `contextSelector` 优先级最高（覆盖两者）。
+
+**Lifecycle events（D5，正交于内部事件隔离）**:
+- 新增 `AgentEvent`：`SubAgentSpawned/Started/Completed/Failed/Steered/Aborted`，由 `BackgroundSubAgentManager` 在状态转换时发射。
+- 子代理**内部事件**（`TextDelta`/`ToolStart` 等）仍隔离（`noop()` 不变）；**trace 不隔离**（子代理 span 挂父委派 tool span 下，0.9.x 边界1 不变）。
+
+## Related
 
 ---
 

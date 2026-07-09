@@ -6,6 +6,35 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-09
+
+### ⚠️ 破坏性变更
+
+- **Agent maxIterations 行为从「抛异常」改为「graceful 收尾」**：超 `maxIterations` 后不再直接抛 `AgentException`，而是注入「收尾」提示并给 `graceTurns`（默认 3）轮收尾机会，超时后返回部分结果
+  - **回退方式**：`.graceTurns(0)` 恢复 0.9.x 硬截断（抛异常）语义
+  - 顶层 Agent 与子代理统一走 graceful（消除 `isSubAgent` 分叉）
+  - 应用层若依赖「超限抛异常」做控制流，需改为检查结果完整性或显式设 `graceTurns(0)`
+
+### 新增
+
+- **SubAgent 系统重做：前台/后台并行执行**，参照 pi-subagents 设计、按 nonchain 作为嵌入式 Java SDK 的定位裁剪
+  - **前台/后台并存**：前台子代理保持 0.9.x 同步内联语义；新增后台子代理（`run_in_background=true`），spawn 后父代理不阻塞、继续推理
+  - **自动 join + 主动拉取**：轮末自动把已完成的后台结果合并成一条消息注入；提供 `get_subagent_result` 工具让父 LLM 主动查询/等待（`wait:true`）
+  - **并发控制**：后台子代理用独立线程池（默认 4 并发），超限进 FIFO 队列；总派发熔断默认 = `maxIterations × maxRunning × 2`（防 LLM 失控）
+  - **生命周期事件**：新增 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 等 `AgentEvent`；子代理内部事件仍隔离（`noop()`），trace 不隔离（全树下钻不变）
+  - **运行中转向（steer）**：后台子代理支持 `steer_subagent` 工具注入转向消息（下一轮 LLM 前生效）；前台/顶层 Agent 不支持
+  - **会话恢复（resume）**：子代理可选配置 `ChatMemoryStore`（复用现有 SPI），支持跨委派保留对话历史；前台连续 resume，后台用 recordId 隔离并发
+  - **优雅轮数限制（graceful max turns）**：见上方破坏性变更
+  - **后台上下文截断**：后台子代理默认只注入最近 4 条父消息（避免并行 token 爆炸），前台保持全量
+- **配置 API**：`SubAgentRegistration` 新增 `.chatMemoryStore()`；`Agent.Builder` 新增 `.graceTurns()` / `.backgroundExecutor()` / `.maxBackgroundRunning()` / `.spawnCeiling()` / `.awaitTimeoutMs()`
+- 新增示例 `BackgroundSubAgentExample`
+
+### 变更
+
+- 子代理 tool schema 新增可选参数 `run_in_background`（D11 调用级前后台）
+- `dispatchExecute` 从三路分流扩展为五路（新增 `get_subagent_result` / `steer_subagent`）
+- 子代理 `toolRegistry` 注册了 subAgent 时 `build()` fail-fast（D10 仅一层委派）
+
 ## [0.9.1] - 2026-06-29
 
 ### 新增

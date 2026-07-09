@@ -7,7 +7,7 @@
 - **LLM Provider 抽象** — 统一的 LLM 调用接口，支持阿里云 DashScope、vLLM 及任何 OpenAI 兼容端点（Ollama、LiteLLM）
 - **流式输出** — `streamChat()` 逐 token 输出，支持思考内容和工具调用流式
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
-- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行、工具拦截器（before/after，可阻止/改写工具调用）和委派型子代理（SubAgent，父 Agent 自主委派子任务并拿回结果）
+- **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行、工具拦截器（before/after，可阻止/改写工具调用）、委派型子代理（SubAgent，父 Agent 自主委派子任务并拿回结果）与前台/后台并行执行（后台子代理不阻塞父 Agent，自动 join 结果 + 运行中 steer 转向 + 会话 resume + graceful max turns）
 - **应用层消息分层** — `Message.note()` 产生 UI-only 状态消息（"正在思考"、"已读取文件"），进 transcript 供 UI 重放，在 LLM 边界被剥离不污染上下文
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
@@ -230,10 +230,30 @@ Agent agent = Agent.builder(llm, registry)
 
 - 子代理默认**无状态**：独立 `systemPrompt`、独立工具集、独立 `before/after` 拦截器、独立 `maxIterations`，默认**继承父 LLM**
 - **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**不含父 `systemPrompt`**）；可在注册时用 `contextSelector(...)` 覆盖默认裁剪策略
-- **callback / trace 隔离**：父侧把子代理视为一次普通工具调用（`onToolStart`/`onToolComplete`/`onToolError`），子代理内部事件不透出到父
+- **callback / trace 隔离**：父侧把子代理视为一次普通工具调用（`onToolStart`/`onToolComplete`/`onToolError`），子代理内部事件不透出到父；新增 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 等生命周期事件供应用层观测
 - **错误语义**：子代理整体失败 → 外层记 `ToolErrorEvent` 并把错误文本回灌父 Agent，父循环继续
-- **并行**：同一轮多个子代理调用可并行执行，结果按原始 tool call 顺序回灌
-- **仅一层**：子代理不能再委派；**仅支持 `Agent` 自动循环**，手写 `registry.execute("子代理名", ...)` 会 fail-fast
+- **graceful max turns（⚠️ 0.10.0 破坏性变更）**：超 `maxIterations` 不再抛异常，改为注入「收尾」提示给 `graceTurns`（默认 3）轮收尾，超时返回部分结果（标 `ABORTED`/`STEERED`）。`.graceTurns(0)` 回退 0.9.x 硬截断（抛 `AgentException`）
+- **仅一层**：子代理 `toolRegistry` 若注册了 subAgent → `build()` fail-fast；**仅支持 `Agent` 自动循环**，手写 `registry.execute("子代理名", ...)` 会 fail-fast
+
+#### 前台 / 后台并行执行（0.10.0）
+
+前台子代理（`run_in_background=false` 或缺省）保持同步内联语义（父 Agent 阻塞等待）。**后台子代理**让父 Agent 派发后不阻塞、继续推理，适合并行调研多个主题：
+
+```java
+Agent agent = Agent.builder(llm, registry)
+        .systemPrompt("你是主助手，可后台并行派发子代理。")
+        .maxBackgroundRunning(4)    // 后台并发上限（默认 4）
+        .graceTurns(3)              // graceful 收尾轮数（默认 3）
+        .build();
+// 父 LLM 在 tool 调用中传 run_in_background=true 即后台执行
+```
+
+- **自动 join + 主动拉取**：每轮结束时框架自动把已完成的后台结果合并成一条消息注入；父 LLM 也可用 `get_subagent_result(id, wait)` 主动查询/等待
+- **运行中转向（steer）**：后台子代理运行时，父 LLM 可用 `steer_subagent(id, message)` 注入转向消息（下一轮 LLM 前生效）；前台/顶层 Agent 不支持 steer
+- **会话恢复（resume）**：子代理可选配置 `.chatMemoryStore(store)`（复用 `ChatMemoryStore` SPI），跨委派保留对话历史——前台连续 resume，后台用 recordId 隔离并发
+- **后台并发控制**：独立线程池（默认 `newFixedThreadPool(4)`），超限进 FIFO 队列；总派发熔断默认 = `maxIterations × maxRunning × 2`（防 LLM 失控）
+- **后台上下文截断**：后台子代理默认只注入最近 4 条父消息（避免并行 token 爆炸），前台保持全量
+- **死循环防护**：join 只注入已完成结果不 spawn 新任务；spawn 受熔断；Complete 前有全局超时（默认 60s）
 
 > **拦截器边界**：父 Agent 的 `before/after` 拦截器作用于外层子代理 tool 调用（可阻止/改写整次委派）；子代理注册时配置的拦截器仅作用于子代理内部工具，不继承父拦截器。
 
@@ -504,6 +524,7 @@ for (SearchResult result : response.results()) {
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 | `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
+| `BackgroundSubAgentExample` | 后台并行子代理：前台/后台 spawn、自动 join、steer 转向、resume、graceful max turns |
 | `TraceTelemetryExample` | 执行链路遥测：录制 Agent/SubAgent/Flow 整棵 span 树，按 runtimeId 拉回并序列化为 JSON |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
