@@ -1461,3 +1461,36 @@ Refactor DashscopeLLM into multi-provider architecture, add generic OpenAI-compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 33: 补充 SubAgent 执行进度事件
+
+**Date**: 2026-07-14
+**Task**: 补充 SubAgent 执行进度事件
+**Branch**: `feat/skill-system`
+
+### Summary
+
+新增 AgentEvent.SubAgentProgress，转发前后台 SubAgent 全部内部事件并携带调用上下文；补充 Skill 注入、重复调用 ID、后台关联与观察者异常测试，更新 SubAgentSkillExample/README/spec。修复后台 future 完成与 join 竞态。chain、chain-example 和全仓 Maven 测试通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e9bd43` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

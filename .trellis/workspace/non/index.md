@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 32
+- **Total Sessions**: 33
 - **Last Active**: 2026-07-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1463 | Active |
+| `journal-1.md` | ~1496 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 33 | 2026-07-14 | 补充 SubAgent 执行进度事件 | `8e9bd43` | `feat/skill-system` |
 | 32 | 2026-07-14 | 完成 Skill 注入角色配置 | `8877d72` | `feat/skill-system` |
 | 31 | 2026-07-09 | 归档 trace-telemetry 任务 | `716270b` | `main` |
 | 30 | 2026-06-29 | 委派型子代理 SubAgent MVP 实施 + 发版 0.9.0 | `5349d84`, `7f1614f`, `88ca9f4`, `5ce6d23` | `main` |
