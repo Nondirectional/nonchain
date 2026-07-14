@@ -2,9 +2,9 @@ package com.non.chain.example;
 
 import com.non.chain.agent.Agent;
 import com.non.chain.agent.AgentEvent;
-import com.non.chain.provider.DashscopeLLM;
+import com.non.chain.agent.SkillInjectionMode;
 import com.non.chain.provider.LLM;
-import com.non.chain.skill.SkillDefinition;
+import com.non.chain.provider.VLLM;
 import com.non.chain.skill.SkillRegistry;
 import com.non.chain.tool.ToolRegistry;
 
@@ -12,14 +12,14 @@ import com.non.chain.tool.ToolRegistry;
  * Skill Demo — 过程性知识注入(顶层 Agent)
  *
  * <p><b>场景</b>：一个开发助手 Agent 配备两个 skill——「PRD 审查清单」和「Git 分支命名规范」。
- * 用户分别提出两个不同意图的问题，LLM 自主判断该用哪个 skill，点选后 skill 内容作为
- * system 消息注入，指导 Agent 按专业知识回答。</p>
+ * 用户分别提出两个不同意图的问题，LLM 自主判断该用哪个 skill，点选后 skill 内容按配置注入，
+ * 指导 Agent 按专业知识回答。</p>
  *
  * <p><b>展示要点</b>：</p>
  * <ul>
  *   <li>skill 在 LLM function 列表里以<b>无参数 function</b> 出现（description 带 {@code [Skill]} 前缀）</li>
  *   <li>LLM 根据 user 意图<b>自主点选</b>——不点、点一个、点多个都由 LLM 决定</li>
- *   <li>点选后产出两条消息：tool result（协议确认）+ <b>system 注入</b>（知识常驻）</li>
+ *   <li>点选后产出两条消息：tool result（协议确认）+ <b>知识注入</b>（知识常驻）</li>
  *   <li>{@code SkillActivated} 事件携带 skill 名和注入内容长度</li>
  * </ul>
  *
@@ -28,7 +28,7 @@ import com.non.chain.tool.ToolRegistry;
 public class SkillExample {
 
     public static void main(String[] args) {
-        LLM llm = new DashscopeLLM("qwen-plus").maxCompletionTokens(2048);
+        LLM llm = new VLLM("http://10.100.10.21:40002/v1","qwen3-14b").maxCompletionTokens(2048);
 
         SkillRegistry skills = new SkillRegistry();
 
@@ -58,6 +58,7 @@ public class SkillExample {
 
         Agent agent = Agent.builder(llm, new ToolRegistry())
                 .skillRegistry(skills)
+                .skillInjectionMode(SkillInjectionMode.USER) // 此 vLLM 部署不支持多条 system 消息
                 .systemPrompt("你是一个开发流程助手。根据用户问题，主动使用可用的 skill 来提供专业回答。")
                 .maxIterations(5)
                 .build();

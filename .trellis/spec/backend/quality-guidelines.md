@@ -171,3 +171,82 @@ new DashscopeLLM(System.getenv("DASHSCOPE_API_KEY"), "qwen-plus", 512)
 - [ ] Chinese error messages for user-facing exceptions
 - [ ] No hardcoded API keys or secrets
 - [ ] New packages follow the existing flat structure (no deep nesting)
+
+---
+
+## Skill Injection Contract
+
+### 1. Scope / Trigger
+
+This contract applies when an Agent exposes a `SkillRegistry` and a model may reject
+multiple `system` messages in its Chat Template.
+
+### 2. Signatures
+
+```java
+public enum SkillInjectionMode { SYSTEM, USER }
+
+Agent.Builder skillInjectionMode(SkillInjectionMode mode)
+```
+
+The setting is immutable after `Agent.Builder.build()` and is copied to dynamically
+constructed sub-agents.
+
+### 3. Contracts
+
+- Default mode: `SYSTEM`.
+- `SYSTEM`: selected Skill produces `Message.system(content)` in addition to the required
+  tool result message.
+- `USER`: selected Skill produces `Message.user("[Skill: " + name + "]\n" + content)` in
+  addition to the required tool result message.
+- `USER` mode keeps the Skill name boundary so injected knowledge is distinguishable from
+  the user's original text.
+- Passing `null` to `skillInjectionMode` resolves to `SYSTEM`.
+- No provider-type or remote-model capability detection is performed; callers choose the
+  mode for their deployed Chat Template.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Mode omitted | `SYSTEM` |
+| Mode is `SYSTEM` | One `system` Skill injection per activation |
+| Mode is `USER` | One marked `user` Skill injection per activation |
+| Mode is `null` | Fallback to `SYSTEM` |
+| Child Agent is dynamically built | Inherit parent mode |
+| No `SkillRegistry` | No Skill messages; existing Agent behavior |
+
+### 5. Good / Base / Bad Cases
+
+- Good: `.skillInjectionMode(SkillInjectionMode.USER)` for a deployed model whose template
+  cannot accept multiple system messages.
+- Base: omit the setting and rely on default `SYSTEM` for existing deployments.
+- Bad: infer the mode from `VLLM` class alone; a provider type does not guarantee the model's
+  actual Chat Template capability.
+
+### 6. Tests Required
+
+- Top-level default test asserts a selected Skill remains a `system` message.
+- Top-level `USER` test asserts tool result, `[Skill: name]` boundary, full content, and no
+  duplicate Skill `system` message.
+- Sub-agent `USER` test asserts dynamic child construction inherits the parent mode.
+- Full `chain` Maven tests must pass without an online provider.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```java
+if (llm instanceof VLLM) {
+    // Assume every vLLM deployment rejects multiple system messages.
+}
+```
+
+Correct:
+
+```java
+Agent.builder(llm, tools)
+    .skillRegistry(skills)
+    .skillInjectionMode(SkillInjectionMode.USER)
+    .build();
+```

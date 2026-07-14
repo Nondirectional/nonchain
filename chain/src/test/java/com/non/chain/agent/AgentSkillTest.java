@@ -23,7 +23,7 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 /**
- * Skill 机制端到端测试:LLM 通过 tool-calling 点选 skill → system 消息注入 → 下一轮遵循。
+ * Skill 机制端到端测试:LLM 通过 tool-calling 点选 skill → 按配置注入消息 → 下一轮遵循。
  *
  * <p>覆盖 design §4-§9:基础注入流、无 skill 回归、命名冲突 fail-fast(D12)、
  * SkillActivated 事件(D9)、多 skill 叠加(PERSISTENT)。</p>
@@ -71,6 +71,48 @@ public class AgentSkillTest {
         }
         assertTrue("第二轮 LLM 应看到 system 注入的 skill 内容", hasSystemInjection);
         assertTrue("第二轮 LLM 应看到 tool result 确认", hasToolResult);
+    }
+
+    /**
+     * USER 模式:skill 内容以带名称边界的 user 消息注入，供不支持多 system 的 Chat Template 使用。
+     */
+    @Test
+    public void skillSelected_userInjectedWithSkillBoundary() {
+        SkillRegistry sr = new SkillRegistry();
+        sr.register("code-review", "审查代码时使用")
+                .content("# 审查流程\n1. 看结构")
+                .build();
+
+        MockLLM llm = new MockLLM(List.of(
+                toolCall("c1", "code-review", "{}"),
+                reply("done")
+        ));
+        Agent agent = Agent.builder(llm, new ToolRegistry())
+                .skillRegistry(sr)
+                .skillInjectionMode(SkillInjectionMode.USER)
+                .build();
+
+        agent.run(new ArrayList<>(List.of(Message.user("帮我审查代码"))));
+
+        List<Message> round2Messages = llm.getCapturedMessages().get(1);
+        boolean hasUserInjection = false;
+        boolean hasSystemInjection = false;
+        boolean hasToolResult = false;
+        for (Message m : round2Messages) {
+            if ("user".equals(m.role())
+                    && "[Skill: code-review]\n# 审查流程\n1. 看结构".equals(m.content())) {
+                hasUserInjection = true;
+            }
+            if ("system".equals(m.role()) && m.content().contains("# 审查流程")) {
+                hasSystemInjection = true;
+            }
+            if ("tool".equals(m.role()) && m.content().contains("code-review 已加载")) {
+                hasToolResult = true;
+            }
+        }
+        assertTrue("USER 模式应注入带 Skill 名称边界的 user 消息", hasUserInjection);
+        assertFalse("USER 模式不应注入相同内容的 system 消息", hasSystemInjection);
+        assertTrue("USER 模式仍应保留 tool result 确认", hasToolResult);
     }
 
     /**

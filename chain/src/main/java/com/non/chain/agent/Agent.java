@@ -81,6 +81,8 @@ public class Agent {
 
     /** skill 注册中心;null = 无 skill(行为与 0.10.0 一致)。 */
     private final SkillRegistry skillRegistry;
+    /** skill 被点选后注入知识的消息角色。 */
+    private final SkillInjectionMode skillInjectionMode;
 
     // ---- 后台子代理配置(D4)----
     private final ExecutorService backgroundExecutor;
@@ -110,6 +112,7 @@ public class Agent {
         this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
         this.subAgentExposureMode = builder.subAgentExposureMode;
         this.skillRegistry = builder.skillRegistry;
+        this.skillInjectionMode = builder.skillInjectionMode;
         this.backgroundExecutor = builder.backgroundExecutor;
         this.maxBackgroundRunning = builder.maxBackgroundRunning;
         this.spawnCeiling = builder.spawnCeiling != null ? builder.spawnCeiling
@@ -593,14 +596,12 @@ public class Agent {
 
     /**
      * Skill 注入执行:取出 skill content → 触发 SkillActivated 事件 → 产出 tool result 确认 +
-     * system 注入消息。skill 走独立路径,不经过 executeWithToolSpan/safeExecute(不碰 interceptor /
+     * 按配置注入消息。skill 走独立路径,不经过 executeWithToolSpan/safeExecute(不碰 interceptor /
      * Tool callback —— D9 锁定 skill 用自己的 SkillActivated 事件)。
-     *
-     * <p>注入位置由 V1 验证结论决定(design §4.5):system 消息(provider 层透明支持)。</p>
      *
      * @param tc             LLM 的 skill 点选调用(无参数)
      * @param eventConsumer  AgentEvent 消费者(可能 null)
-     * @return tool result 文本 + 额外注入消息(skill 的 system 注入)
+     * @return tool result 文本 + 额外注入消息
      */
     private DispatchResult executeSkill(ToolCall tc, java.util.function.Consumer<AgentEvent> eventConsumer) {
         SkillDefinition def = skillRegistry.get(tc.name());
@@ -615,10 +616,11 @@ public class Agent {
         Tracer.ScopedSpan skillSpan = tracer != null
                 ? tracer.startSpan(SpanAttributes.SpanType.TOOL, "skill:" + def.name()) : null;
         try {
-            // 双消息注入(design §4.2):tool result(满足 tool-calling 协议)+ system 注入(知识)
-            // V1 验证确认 system 注入可行(design §4.5);fallback 到 user 仅改下面一行
-            String toolResultText = "(skill " + def.name() + " 已加载,详见系统指令)";
-            Message injection = Message.system(content);
+            // 双消息注入:tool result(满足 tool-calling 协议)+ 按配置注入的知识。
+            String toolResultText = "(skill " + def.name() + " 已加载,详见 Skill 注入内容)";
+            Message injection = skillInjectionMode == SkillInjectionMode.USER
+                    ? Message.user("[Skill: " + def.name() + "]\n" + content)
+                    : Message.system(content);
             return new DispatchResult(toolResultText, java.util.Collections.singletonList(injection));
         } finally {
             if (skillSpan != null) {
@@ -750,6 +752,7 @@ public class Agent {
         Agent.Builder childBuilder = Agent.builder(childLlm, childRegistry)
                 .systemPrompt(def.systemPrompt())
                 .graceTurns(DEFAULT_GRACE_TURNS)   // D9 子代理统一 graceful
+                .skillInjectionMode(skillInjectionMode)
                 .callback(ChainCallbackUtil.noop()); // 父/子【用户面】callback 隔离(既有承诺不变)
         if (background) {
             childBuilder.enableSteer();  // D6 后台子代理启用 steer
@@ -951,6 +954,8 @@ public class Agent {
 
         /** skill 注册中心;null = 无 skill。 */
         private SkillRegistry skillRegistry;
+        /** skill 注入模式;默认 SYSTEM，保持既有消息序列。 */
+        private SkillInjectionMode skillInjectionMode = SkillInjectionMode.SYSTEM;
 
         // ---- 后台子代理配置(D4)----
         private ExecutorService backgroundExecutor;       // 默认 null → run() 时按 maxBackgroundRunning 创建
@@ -1094,14 +1099,29 @@ public class Agent {
         }
 
         /**
-         * 注册 skill 中心。skill 是过程性知识/指令文本,LLM 通过 tool-calling 点选后注入
-         * system 消息。不调用则该 Agent 无 skill 能力,行为与 0.10.0 一致。
+         * 注册 skill 中心。skill 是过程性知识/指令文本,LLM 通过 tool-calling 点选后按
+         * {@link #skillInjectionMode(SkillInjectionMode)} 注入消息。不调用则该 Agent 无 skill 能力,
+         * 行为与 0.10.0 一致。
          *
          * <p>命名冲突在 {@link #build()} 时校验:skill 名不能与 tool 名 / sub-agent 名 /
          * 框架保留名(delegate_to_subagent 等)重复,否则 fail-fast。</p>
          */
         public Builder skillRegistry(SkillRegistry skillRegistry) {
             this.skillRegistry = skillRegistry;
+            return this;
+        }
+
+        /**
+         * 设置 Skill 被点选后的知识注入角色。
+         *
+         * <p>默认 {@link SkillInjectionMode#SYSTEM}，保持既有行为。对于不支持在对话中
+         * 追加多条 system 消息的模型 Chat Template，可显式设为
+         * {@link SkillInjectionMode#USER}；此时内容会带 {@code [Skill: name]} 边界。
+         * 传 {@code null} 回退默认值 {@code SYSTEM}。</p>
+         */
+        public Builder skillInjectionMode(SkillInjectionMode skillInjectionMode) {
+            this.skillInjectionMode = skillInjectionMode == null
+                    ? SkillInjectionMode.SYSTEM : skillInjectionMode;
             return this;
         }
 
@@ -1259,10 +1279,10 @@ public class Agent {
     }
 
     /**
-     * Skill 执行产物:tool result 文本 + system 注入消息。
+     * Skill 执行产物:tool result 文本 + 按配置生成的注入消息。
      *
      * <p>仅 skill 路径使用(普通 tool / sub-agent 走 {@code dispatchExecute} 返回 String,不经此类型)。
-     * skill 被点选后,产出 tool result(满足 tool-calling 协议)+ system 注入(知识)两条消息。</p>
+     * skill 被点选后,产出 tool result(满足 tool-calling 协议)+ 知识注入两条消息。</p>
      */
     private static final class DispatchResult {
         final String toolResultText;

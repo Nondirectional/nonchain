@@ -288,7 +288,7 @@ public interface AgentEvent {
     }
 
     /**
-     * Skill 被激活(过程性知识注入 system 消息)。
+     * Skill 被激活(过程性知识按 Agent 配置注入消息)。
      *
      * <p>{@code contentLength} 为注入内容长度(不存全文——全文在对话 messages 里)。</p>
      */

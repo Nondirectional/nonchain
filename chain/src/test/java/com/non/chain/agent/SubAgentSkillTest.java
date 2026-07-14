@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.function.Consumer;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -27,7 +28,7 @@ import static org.junit.Assert.fail;
  * <p>验证子代理挂载 skillRegistry 后,在委派执行时能像顶层 Agent 一样:
  * <ul>
  *   <li>在 LLM schema 里看到 skill function</li>
- *   <li>点选 skill 后注入 system 消息</li>
+ *   <li>点选 skill 后按 Agent 配置注入消息</li>
  *   <li>子 agent 范围内 skill 名 vs tool 名冲突 fail-fast</li>
  * </ul>
  * </p>
@@ -35,7 +36,7 @@ import static org.junit.Assert.fail;
 public class SubAgentSkillTest {
 
     /**
-     * 子代理挂载 skill:委派执行时子 agent 能点选 skill → system 注入。
+     * 子代理挂载 skill:委派执行时子 agent 能点选 skill → 默认 system 注入。
      *
      * <p>LLM 调用顺序(父子共享 mock):父(委派 reviewer)→ 子(点选 review-skill)→ 子(回复)→ 父(最终)。
      * 子 agent 的 skill 必须出现在子 agent 的 LLM schema 里。</p>
@@ -92,6 +93,50 @@ public class SubAgentSkillTest {
             }
         }
         assertTrue("子 agent 点选 skill 后应注入 system 消息", hasSystemInjection);
+    }
+
+    /**
+     * 父 Agent 的 USER 注入模式会传播至动态构造的子代理。
+     */
+    @Test
+    public void subAgentWithSkill_inheritsUserInjectionMode() {
+        SkillRegistry childSkills = new SkillRegistry();
+        childSkills.register("review-checklist", "审查代码时使用")
+                .content("# 审查清单")
+                .build();
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("reviewer", "负责代码审查")
+                .systemPrompt("你是代码审查代理。")
+                .skillRegistry(childSkills)
+                .build();
+
+        MockLLM llm = new MockLLM(Arrays.asList(
+                toolCall("c1", "reviewer", "{\"task\":\"审查这段代码\"}"),
+                toolCall("s1", "review-checklist", "{}"),
+                reply("子代理完成"),
+                reply("父代理完成")
+        ));
+        Agent agent = Agent.builder(llm, registry)
+                .skillInjectionMode(SkillInjectionMode.USER)
+                .build();
+
+        assertEquals("父代理完成", agent.run("帮我审查代码").content());
+
+        List<Message> childRound2Messages = llm.getCapturedMessages().get(2);
+        boolean hasUserInjection = false;
+        boolean hasSystemInjection = false;
+        for (Message m : childRound2Messages) {
+            if ("user".equals(m.role())
+                    && "[Skill: review-checklist]\n# 审查清单".equals(m.content())) {
+                hasUserInjection = true;
+            }
+            if ("system".equals(m.role()) && m.content().contains("# 审查清单")) {
+                hasSystemInjection = true;
+            }
+        }
+        assertTrue("子代理应继承父 Agent 的 USER 注入模式", hasUserInjection);
+        assertFalse("子代理 USER 模式不应追加 Skill system 消息", hasSystemInjection);
     }
 
     /**

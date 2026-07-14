@@ -31,7 +31,7 @@ public final class SkillDefinition {
         return description;
     }
 
-    /** skill 正文,注入 system 消息的内容(MVP PERSISTENT 常驻)。 */
+    /** skill 正文,按 Agent 配置注入消息的内容(MVP PERSISTENT 常驻)。 */
     public String content() {
         return content;
     }

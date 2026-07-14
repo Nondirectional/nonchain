@@ -14,7 +14,7 @@ import com.non.chain.tool.ToolRegistry;
  * 「OWASP 漏洞检查清单」skill。当用户请求代码安全审查时：</p>
  * <ol>
  *   <li>主 Agent 判断这是安全审查任务 → 委派给 security-reviewer 子代理</li>
- *   <li>子代理收到任务 → 自主点选 OWASP 清单 skill → skill 内容注入 system 消息</li>
+ *   <li>子代理收到任务 → 自主点选 OWASP 清单 skill → skill 内容按 Agent 配置注入消息</li>
  *   <li>子代理按清单逐项检查 → 返回结构化审查报告</li>
  *   <li>主 Agent 拿到子代理结果 → 转述给用户</li>
  * </ol>

@@ -49,6 +49,7 @@ src/main/java/com/non/chain/
 │   ├── AfterResult.java      # after interceptor return type (keep/rewrite)
 │   ├── ToolCallContext.java  # Immutable interceptor input context
 │   ├── SubAgentExposureMode.java  # Enum: DIRECT (default, one tool per sub-agent) / DELEGATE (single delegate tool)
+│   ├── SkillInjectionMode.java  # Enum: SYSTEM (default) / USER Skill knowledge injection role
 │   ├── SubAgentDefinition.java    # Immutable value object: sub-agent config (name/desc/systemPrompt/llm/tools/chatMemoryStore/skillRegistry/...)
 │   ├── ContextSelector.java       # Functional interface: parent-context pruning strategy for sub-agents
 │   ├── SubAgentStatus.java        # Enum: RUNNING/COMPLETED/STEERED/ABORTED/FAILED (graceful max turns)
@@ -109,11 +110,11 @@ Delegated sub-agents are registered in `ToolRegistry`, exposed by `Agent.Builder
 7. Parent `Agent` graceful: `.graceTurns(n)` (default 3; **0 = fallback to 0.9.x hard-cutoff throwing `AgentException`**). `.graceTurns(0)` is the only path that throws on maxIterations exceeded.
 
 ### Registering a skill (procedural knowledge injection)
-Skills are **processual knowledge text** (not executable tools) — they tell the Agent *how* to do something. The LLM self-selects a skill via tool-calling; on selection, the skill's content is injected as a `system` message. Skills live in an independent `SkillRegistry` (parallel to `ToolRegistry`):
+Skills are **processual knowledge text** (not executable tools) — they tell the Agent *how* to do something. The LLM self-selects a skill via tool-calling; on selection, the skill's content is injected according to the Agent's `SkillInjectionMode` (default `SYSTEM`, explicit `USER` override). Skills live in an independent `SkillRegistry` (parallel to `ToolRegistry`):
 1. Create `SkillRegistry`, register skills via fluent `registry.register(name, description).content(text).build()` or `registry.register(SkillDefinition)`
 2. `Agent.builder(llm, toolRegistry).skillRegistry(skillRegistry)` — skillRegistry is optional (null = no skill, 0.10.0 behavior)
 3. Each skill appears in the LLM function list as a **paramless function** (description prefixed `[Skill]`); LLM self-selects based on user intent — recall quality depends on description accuracy
-4. On selection, `executeSkill` produces two messages: `tool result` (protocol ack) + `Message.system(content)` (knowledge injection, PERSISTENT)
+4. On selection, `executeSkill` produces two messages: `tool result` (protocol ack) + a PERSISTENT knowledge injection (`Message.system(content)` by default or a marked `Message.user(...)` in `USER` mode)
 5. Skills bypass `executeWithToolSpan`/`safeExecute`/`dispatchExecute` entirely (no interceptor, no Tool callback); activation fires `AgentEvent.SkillActivated` + a trace span (SpanType.TOOL, name `skill:<name>`)
 6. **Naming conflict guard (D12)**: `build()` validates skill names don't collide with tool names / sub-agent names / reserved names (`delegate_to_subagent`, `get_subagent_result`, `steer_subagent`) — fail-fast `IllegalStateException`
 
