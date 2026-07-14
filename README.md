@@ -552,6 +552,8 @@ for (SearchResult result : response.results()) {
 | `BackgroundSubAgentExample` | 后台并行子代理：前台/后台 spawn、自动 join、steer 转向、resume、graceful max turns |
 | `TraceTelemetryExample` | 执行链路遥测：录制 Agent/SubAgent/Flow 整棵 span 树，按 runtimeId 拉回并序列化为 JSON |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
+| `SkillExample` | Skill 过程性知识注入：LLM 自主点选 skill（PRD 审查 / Git 分支命名），内容注入 system 消息 |
+| `SubAgentSkillExample` | SubAgent + Skill：子代理预加载 OWASP 检查清单，委派执行时自主点选注入 |
 | `VLLMExample` | vLLM provider：thinking 模式、思考预算控制 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
 | `EasyWorkflowExample` | 图工作流 + 条件路由 |
