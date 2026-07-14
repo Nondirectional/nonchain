@@ -11,6 +11,34 @@ import java.util.function.Consumer;
 
 public interface LLM {
 
+    /**
+     * 当前模型的 Chat Template 是否支持多条 system 消息。
+     *
+     * <p>默认 true，避免改变既有自定义 LLM 的行为；不支持的具体模型由调用方在实例上显式声明。</p>
+     */
+    default boolean supportsMultipleSystemMessages() {
+        return true;
+    }
+
+    /**
+     * 配置当前 LLM 实例的多 system 能力。
+     *
+     * <p>内置 provider 提供可链式实现；自定义 LLM 若需要运行时切换能力可覆写此方法。
+     * 默认实现显式失败，避免静默忽略调用方的兼容性配置。</p>
+     */
+    default LLM supportsMultipleSystemMessages(boolean supported) {
+        throw new UnsupportedOperationException("当前 LLM 不支持配置多 system 消息能力");
+    }
+
+    /**
+     * 为一次 LLM 请求准备消息副本。
+     *
+     * <p>返回值可被 provider 修改/转换，调用方传入的 Agent transcript 不会被原地改写。</p>
+     */
+    default List<Message> prepareMessages(List<Message> messages) {
+        return MessageNormalizer.normalizeForRequest(messages, supportsMultipleSystemMessages());
+    }
+
     // ---- 同步调用 ----
 
     /**

@@ -394,6 +394,125 @@ public class SubAgentTest {
         assertEquals("自定义裁剪上下文", childMessages.get(1).content());
     }
 
+    @Test
+    public void childContextSanitizesSystemInvisibleAndIncompleteToolGroups() {
+        MockLLM childLlm = new MockLLM(Collections.singletonList(reply("子结果")));
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("sub", "子代理")
+                .systemPrompt("子角色")
+                .llm(childLlm)
+                .contextSelector((parent, assistant, task) -> Arrays.asList(
+                        Message.system("父 selector system"),
+                        Message.note("status", "隐藏状态"),
+                        Message.assistantWithToolCalls("", Collections.singletonList(
+                                new ToolCall("orphan-call", "lookup", "{}"))),
+                        Message.toolResult("other-call", "孤立结果"),
+                        Message.user("保留的上下文")
+                ))
+                .build();
+
+        MockLLM parentLlm = new MockLLM(Arrays.asList(
+                toolCall("c1", "sub", "{\"task\":\"t\"}"),
+                reply("父答复")
+        ));
+
+        Agent agent = Agent.builder(parentLlm, registry).build();
+        agent.run("父问题");
+
+        List<Message> childMessages = childLlm.getCapturedMessages().get(0);
+        assertEquals("system", childMessages.get(0).role());
+        assertEquals("子角色", childMessages.get(0).content());
+        assertEquals("user", childMessages.get(1).role());
+        assertEquals("保留的上下文", childMessages.get(1).content());
+        assertEquals("t", childMessages.get(2).content());
+        for (Message message : childMessages) {
+            assertTrue("子代理消息不应包含不可见消息", message.llmVisible());
+            assertFalse("父 system 不应绕过 selector 过滤", "父 selector system".equals(message.content()));
+            assertFalse("不应留下孤立工具调用", "tool".equals(message.role()));
+            assertFalse("不应留下孤立 assistant(toolCalls)",
+                    "assistant".equals(message.role())
+                            && message.toolCalls() != null && !message.toolCalls().isEmpty());
+        }
+    }
+
+    @Test
+    public void childContextPreservesCompleteToolCallGroup() {
+        MockLLM childLlm = new MockLLM(Collections.singletonList(reply("子结果")));
+        ToolCall c1 = new ToolCall("call-1", "lookup", "{}");
+        ToolCall c2 = new ToolCall("call-2", "read", "{}");
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("sub", "子代理")
+                .systemPrompt("子角色")
+                .llm(childLlm)
+                .contextSelector((parent, assistant, task) -> Arrays.asList(
+                        Message.user("前置上下文"),
+                        Message.assistantWithToolCalls("", Arrays.asList(c1, c2)),
+                        Message.toolResult("call-2", "第二个结果"),
+                        Message.toolResult("call-1", "第一个结果"),
+                        Message.note("ui", "不进模型")
+                ))
+                .build();
+
+        MockLLM parentLlm = new MockLLM(Arrays.asList(
+                toolCall("c1", "sub", "{\"task\":\"t\"}"),
+                reply("父答复")
+        ));
+
+        Agent agent = Agent.builder(parentLlm, registry).build();
+        agent.run("父问题");
+
+        List<Message> childMessages = childLlm.getCapturedMessages().get(0);
+        assertEquals(6, childMessages.size());
+        assertEquals("前置上下文", childMessages.get(1).content());
+        assertEquals("assistant", childMessages.get(2).role());
+        assertEquals(2, childMessages.get(2).toolCalls().size());
+        assertEquals("call-2", childMessages.get(3).toolCallId());
+        assertEquals("call-1", childMessages.get(4).toolCallId());
+        assertEquals("t", childMessages.get(5).content());
+    }
+
+    @Test
+    public void backgroundContextWindowDropsSplitToolGroup() {
+        MockLLM childLlm = new MockLLM(Collections.singletonList(reply("后台子结果")));
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("worker", "后台子代理")
+                .systemPrompt("后台角色")
+                .llm(childLlm)
+                .build();
+
+        MockLLM parentLlm = new MockLLM(Arrays.asList(
+                toolCall("bg-1", "worker", "{\"task\":\"后台任务\",\"run_in_background\":true}"),
+                reply("父完成"),
+                reply("父完成"),
+                reply("父完成")
+        ));
+        Agent agent = Agent.builder(parentLlm, registry).build();
+
+        List<Message> parentMessages = Arrays.asList(
+                Message.user("旧问题"),
+                Message.assistantWithToolCalls("", Arrays.asList(
+                        new ToolCall("old-1", "lookup", "{}"),
+                        new ToolCall("old-2", "read", "{}"))),
+                Message.toolResult("old-1", "旧结果一"),
+                Message.toolResult("old-2", "旧结果二"),
+                Message.user("最新问题")
+        );
+        assertEquals("父完成", agent.run(parentMessages).content());
+
+        List<Message> childMessages = childLlm.getCapturedMessages().get(0);
+        assertEquals("system", childMessages.get(0).role());
+        assertEquals("最新问题", childMessages.get(1).content());
+        assertEquals("后台任务", childMessages.get(2).content());
+        for (Message message : childMessages) {
+            assertFalse("后台窗口截断后不应保留孤立 tool", "tool".equals(message.role()));
+            assertFalse("后台窗口截断后不应保留孤立 tool-call",
+                    "assistant".equals(message.role())
+                            && message.toolCalls() != null && !message.toolCalls().isEmpty());
+        }
+    }
+
     // ====================== 并行委派 ======================
 
     @Test

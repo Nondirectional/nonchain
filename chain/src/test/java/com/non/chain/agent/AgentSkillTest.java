@@ -13,6 +13,7 @@ import com.non.chain.tool.ToolRegistry;
 import org.junit.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
@@ -113,6 +114,42 @@ public class AgentSkillTest {
         assertTrue("USER 模式应注入带 Skill 名称边界的 user 消息", hasUserInjection);
         assertFalse("USER 模式不应注入相同内容的 system 消息", hasSystemInjection);
         assertTrue("USER 模式仍应保留 tool result 确认", hasToolResult);
+    }
+
+    /**
+     * 模型声明不支持多 system 时，即使 Agent 配置为 SYSTEM，框架也应在请求副本中自动降级为 user。
+     */
+    @Test
+    public void skillSelected_systemModeFallsBackToUserForUnsupportedModel() {
+        SkillRegistry sr = new SkillRegistry();
+        sr.register("code-review", "审查代码时使用")
+                .content("# 审查流程")
+                .build();
+
+        UnsupportedSystemMockLLM llm = new UnsupportedSystemMockLLM(Arrays.asList(
+                toolCall("c1", "code-review", "{}"),
+                reply("done")
+        ));
+        Agent agent = Agent.builder(llm, new ToolRegistry())
+                .skillRegistry(sr)
+                .build();
+
+        agent.run(new ArrayList<>(List.of(Message.user("帮我审查代码"))));
+
+        List<Message> round2Messages = llm.getCapturedMessages().get(1);
+        boolean hasFrameworkUserInjection = false;
+        boolean hasSkillSystemInjection = false;
+        for (Message message : round2Messages) {
+            if ("user".equals(message.role())
+                    && "[Framework System Instruction]\n# 审查流程".equals(message.content())) {
+                hasFrameworkUserInjection = true;
+            }
+            if ("system".equals(message.role()) && message.content().contains("# 审查流程")) {
+                hasSkillSystemInjection = true;
+            }
+        }
+        assertTrue("不支持多 system 时 SYSTEM Skill 应自动降级为框架 user 边界", hasFrameworkUserInjection);
+        assertFalse("不支持多 system 时请求不应保留 Skill system", hasSkillSystemInjection);
     }
 
     /**
@@ -407,6 +444,17 @@ public class AgentSkillTest {
 
         List<List<Tool>> getCapturedTools() {
             return capturedTools;
+        }
+    }
+
+    static class UnsupportedSystemMockLLM extends MockLLM {
+        UnsupportedSystemMockLLM(List<ChatResult> responses) {
+            super(responses);
+        }
+
+        @Override
+        public boolean supportsMultipleSystemMessages() {
+            return false;
         }
     }
 }

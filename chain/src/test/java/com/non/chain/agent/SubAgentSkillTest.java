@@ -70,11 +70,20 @@ public class SubAgentSkillTest {
                 reply("审查完成:代码基本合格,建议补充空指针检查。")
         ));
 
-        Agent agent = Agent.builder(llm, registry).build();
+        Agent agent = Agent.builder(llm, registry)
+                .systemPrompt("你是父助手。")
+                .build();
         List<AgentEvent> events = Collections.synchronizedList(new ArrayList<>());
         ChatResult result = agent.run("帮我审查代码", events::add);
 
         assertEquals("审查完成:代码基本合格,建议补充空指针检查。", result.content());
+
+        List<Message> childRound1Messages = llm.getCapturedMessages().get(1);
+        assertEquals("system", childRound1Messages.get(0).role());
+        for (int i = 1; i < childRound1Messages.size(); i++) {
+            assertFalse("父 system 消息不能追加到子代理 systemPrompt 后",
+                    "system".equals(childRound1Messages.get(i).role()));
+        }
 
         // 子 agent 第一轮调用(第 2 次 LLM 调用,index=1)的 schema 应包含 skill
         List<List<Tool>> capturedTools = llm.getCapturedTools();
@@ -209,6 +218,44 @@ public class SubAgentSkillTest {
         }
         assertTrue("子代理应继承父 Agent 的 USER 注入模式", hasUserInjection);
         assertFalse("子代理 USER 模式不应追加 Skill system 消息", hasSystemInjection);
+    }
+
+    /** 父 Skill 使用 USER 注入时，内容作为普通 user 上下文可传递给子代理。 */
+    @Test
+    public void parentUserSkill_isPassedAsVisibleContext() {
+        SkillRegistry parentSkills = new SkillRegistry();
+        parentSkills.register("parent-guideline", "父级工作规范")
+                .content("# 父级规范")
+                .build();
+
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("worker", "执行任务")
+                .systemPrompt("你是子代理")
+                .build();
+
+        MockLLM llm = new MockLLM(Arrays.asList(
+                toolCall("s1", "parent-guideline", "{}"),
+                toolCall("c1", "worker", "{\"task\":\"执行\"}"),
+                reply("子代理结果"),
+                reply("父代理结果")
+        ));
+        Agent agent = Agent.builder(llm, registry)
+                .systemPrompt("父级 system")
+                .skillRegistry(parentSkills)
+                .skillInjectionMode(SkillInjectionMode.USER)
+                .build();
+
+        assertEquals("父代理结果", agent.run("开始").content());
+
+        List<Message> childMessages = llm.getCapturedMessages().get(2);
+        boolean hasParentUserSkill = false;
+        for (Message message : childMessages) {
+            if ("user".equals(message.role()) && "[Skill: parent-guideline]\n# 父级规范".equals(message.content())) {
+                hasParentUserSkill = true;
+            }
+            assertFalse("父 system 不应传给子代理", "父级 system".equals(message.content()));
+        }
+        assertTrue("父 USER Skill 应作为普通 user 上下文传递", hasParentUserSkill);
     }
 
     /** 子代理 progress 消费者异常不应改变子代理和父 Agent 的业务结果。 */

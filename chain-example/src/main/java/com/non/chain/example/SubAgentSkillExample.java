@@ -2,6 +2,7 @@ package com.non.chain.example;
 
 import com.non.chain.agent.Agent;
 import com.non.chain.agent.AgentEvent;
+import com.non.chain.agent.SkillInjectionMode;
 import com.non.chain.provider.LLM;
 import com.non.chain.provider.VLLM;
 import com.non.chain.skill.SkillRegistry;
@@ -61,6 +62,7 @@ public class SubAgentSkillExample {
                 .systemPrompt("你是主助手。涉及代码安全审查时，委派给 security-reviewer 子代理一次即可，"
                         + "拿到结果后直接转述给用户，不要重复委派。其他问题自己回答。")
                 .maxIterations(5)
+                .skillInjectionMode(SkillInjectionMode.USER)
                 .build();
 
         // 故意提供一段有 SQL 注入漏洞的代码

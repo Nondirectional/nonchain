@@ -95,6 +95,12 @@ public class DashscopeLLM extends AbstractOpenAILLM {
         return this;
     }
 
+    @Override
+    public DashscopeLLM supportsMultipleSystemMessages(boolean supported) {
+        super.supportsMultipleSystemMessages(supported);
+        return this;
+    }
+
     // ---- 覆写：DashScope 特有参数 ----
 
     /**

@@ -98,4 +98,10 @@ public class OpenAICompatibleLLM extends AbstractOpenAILLM {
         super.topP(topP);
         return this;
     }
+
+    @Override
+    public OpenAICompatibleLLM supportsMultipleSystemMessages(boolean supported) {
+        super.supportsMultipleSystemMessages(supported);
+        return this;
+    }
 }

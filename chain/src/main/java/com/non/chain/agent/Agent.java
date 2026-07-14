@@ -34,9 +34,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -314,8 +317,9 @@ public class Agent {
                     ChatResult result;
                     long start = System.currentTimeMillis();
                     try {
+                        List<Message> requestMessages = llm.prepareMessages(messages);
                         if (eventConsumer != null) {
-                            result = llm.streamChat(messages, tools, OutputFormat.TEXT, chunk -> {
+                            result = llm.streamChat(requestMessages, tools, OutputFormat.TEXT, chunk -> {
                                 if (chunk.hasContent()) {
                                     eventConsumer.accept(new AgentEvent.TextDelta(chunk.deltaContent()));
                                 }
@@ -330,7 +334,7 @@ public class Agent {
                                 }
                             });
                         } else {
-                            result = llm.chat(messages, tools);
+                            result = llm.chat(requestMessages, tools);
                         }
                         long latencyMs = System.currentTimeMillis() - start;
                         callback.onLlmComplete(new LlmCompleteEvent(traceId, result, null, latencyMs));
@@ -772,7 +776,7 @@ public class Agent {
                     ? def.contextSelector()
                     : (background ? BACKGROUND_CONTEXT_SELECTOR : DEFAULT_CONTEXT_SELECTOR);
             List<Message> parentSlice = selector.select(parentMessages, assistantMessage, task);
-            childMessages.addAll(parentSlice);
+            childMessages.addAll(normalizeSubAgentContext(parentSlice));
         }
         childMessages.add(Message.user(task));
 
@@ -941,6 +945,92 @@ public class Agent {
         int n = Math.min(visible.size(), BACKGROUND_CONTEXT_WINDOW);
         return new ArrayList<>(visible.subList(visible.size() - n, visible.size()));
     };
+
+    /**
+     * 归一化进入 SubAgent 的父上下文：过滤不可见消息/父 system，并保证工具调用消息成组。
+     *
+     * <p>ContextSelector 可以自定义选择结果，但不能绕过这层协议安全边界。输入消息不被修改，
+     * 返回列表只复用合法的原消息对象。</p>
+     */
+    private static List<Message> normalizeSubAgentContext(List<Message> selected) {
+        if (selected == null || selected.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<Message> visible = new ArrayList<>(selected.size());
+        for (Message message : selected) {
+            if (message != null && message.llmVisible() && !"system".equals(message.role())) {
+                visible.add(message);
+            }
+        }
+
+        List<Message> normalized = new ArrayList<>(visible.size());
+        int index = 0;
+        while (index < visible.size()) {
+            Message message = visible.get(index);
+            if ("tool".equals(message.role())) {
+                // 没有先行 assistant(toolCalls) 的 tool 结果是孤立消息。
+                index++;
+                continue;
+            }
+            if (isAssistantWithToolCalls(message)) {
+                int groupEnd = findCompleteToolGroupEnd(visible, index);
+                if (groupEnd >= 0) {
+                    for (int i = index; i <= groupEnd; i++) {
+                        normalized.add(visible.get(i));
+                    }
+                    index = groupEnd + 1;
+                } else {
+                    // 丢弃 assistant 及其紧邻的 tool 片段；后续孤立 tool 会在下一轮扫描跳过。
+                    index = skipToolFragment(visible, index);
+                }
+                continue;
+            }
+            normalized.add(message);
+            index++;
+        }
+        return normalized;
+    }
+
+    private static int findCompleteToolGroupEnd(List<Message> messages, int assistantIndex) {
+        Message assistant = messages.get(assistantIndex);
+        List<ToolCall> toolCalls = assistant.toolCalls();
+        Set<String> expected = new LinkedHashSet<>();
+        for (ToolCall toolCall : toolCalls) {
+            if (toolCall == null || toolCall.id() == null || toolCall.id().isBlank()
+                    || !expected.add(toolCall.id())) {
+                return -1;
+            }
+        }
+
+        Set<String> seen = new HashSet<>();
+        int index = assistantIndex + 1;
+        while (index < messages.size() && "tool".equals(messages.get(index).role())) {
+            if (seen.equals(expected)) {
+                return index - 1;
+            }
+            String toolCallId = messages.get(index).toolCallId();
+            if (toolCallId == null || !expected.contains(toolCallId) || !seen.add(toolCallId)) {
+                return -1;
+            }
+            index++;
+        }
+        return seen.equals(expected) ? index - 1 : -1;
+    }
+
+    private static int skipToolFragment(List<Message> messages, int assistantIndex) {
+        int index = assistantIndex + 1;
+        while (index < messages.size() && "tool".equals(messages.get(index).role())) {
+            index++;
+        }
+        return index;
+    }
+
+    private static boolean isAssistantWithToolCalls(Message message) {
+        return "assistant".equals(message.role())
+                && message.toolCalls() != null
+                && !message.toolCalls().isEmpty();
+    }
 
     /** D11 从 tool arguments 解析 run_in_background(默认 false) */
     private boolean parseBackgroundArg(String arguments) {

@@ -202,15 +202,18 @@ constructed sub-agents.
 - `USER` mode keeps the Skill name boundary so injected knowledge is distinguishable from
   the user's original text.
 - Passing `null` to `skillInjectionMode` resolves to `SYSTEM`.
-- No provider-type or remote-model capability detection is performed; callers choose the
-  mode for their deployed Chat Template.
+- Model compatibility is declared on the LLM instance, not inferred from `VLLM` or another
+  provider class. `SYSTEM` is automatically converted to a framework-bounded user message
+  when the instance declares that it does not support multiple system messages; explicit
+  `USER` remains user injection.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Result |
 |---|---|
 | Mode omitted | `SYSTEM` |
-| Mode is `SYSTEM` | One `system` Skill injection per activation |
+| Mode is `SYSTEM` and model supports multiple system | One `system` Skill injection per activation |
+| Mode is `SYSTEM` and model does not support multiple system | One user injection with `[Framework System Instruction]` boundary |
 | Mode is `USER` | One marked `user` Skill injection per activation |
 | Mode is `null` | Fallback to `SYSTEM` |
 | Child Agent is dynamically built | Inherit parent mode |
@@ -218,8 +221,8 @@ constructed sub-agents.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: `.skillInjectionMode(SkillInjectionMode.USER)` for a deployed model whose template
-  cannot accept multiple system messages.
+- Good: `llm.supportsMultipleSystemMessages(false)` for the concrete model instance whose
+  Chat Template rejects non-leading system messages.
 - Base: omit the setting and rely on default `SYSTEM` for existing deployments.
 - Bad: infer the mode from `VLLM` class alone; a provider type does not guarantee the model's
   actual Chat Template capability.
@@ -229,6 +232,8 @@ constructed sub-agents.
 - Top-level default test asserts a selected Skill remains a `system` message.
 - Top-level `USER` test asserts tool result, `[Skill: name]` boundary, full content, and no
   duplicate Skill `system` message.
+- Unsupported-model test asserts `SYSTEM` is converted only in the request copy and the
+  Agent transcript remains a system message.
 - Sub-agent `USER` test asserts dynamic child construction inherits the parent mode.
 - Full `chain` Maven tests must pass without an online provider.
 
@@ -245,10 +250,91 @@ if (llm instanceof VLLM) {
 Correct:
 
 ```java
-Agent.builder(llm, tools)
-    .skillRegistry(skills)
-    .skillInjectionMode(SkillInjectionMode.USER)
-    .build();
+llm.supportsMultipleSystemMessages(false);
+Agent.builder(llm, tools).skillRegistry(skills).build();
+```
+
+---
+
+## LLM Request Message Normalization Contract
+
+### 1. Scope / Trigger
+
+This contract applies whenever an LLM Chat Template may reject multiple `system` messages or
+when a SubAgent receives a sliced parent transcript containing incomplete tool-call groups.
+
+### 2. Signatures
+
+```java
+interface LLM {
+    default boolean supportsMultipleSystemMessages(); // default true
+    default LLM supportsMultipleSystemMessages(boolean supported);
+    default List<Message> prepareMessages(List<Message> messages);
+}
+```
+
+`AbstractOpenAILLM` implements a fluent setter with default `true`; `OpenAICompatibleLLM`,
+`VLLM`, and `DashscopeLLM` return their concrete type. `Agent` passes a request copy to
+`chat`/`streamChat`; `AbstractOpenAILLM` repeats the same idempotent normalization before
+building SDK parameters for direct provider calls.
+
+### 3. Contracts
+
+- Parent `system` messages are always excluded at the SubAgent context boundary; they are never
+  converted to user messages or merged into the child system prompt.
+- Parent `USER` Skill messages remain ordinary visible user context and are subject to the selector.
+- Selector results always drop `llmVisible=false` messages and incomplete/orphaned
+  `assistant(toolCalls)` / `tool` groups.
+- For `supportsMultipleSystemMessages=true`, request message order and system roles are preserved.
+- For `false`, retain only the first visible system when it is the first visible message; convert
+  later systems (or all systems when the first visible message is not system) to
+  `Message.user("[Framework System Instruction]\\n" + content)`.
+- A converted system between an assistant tool call and its continuous tool results is deferred
+  until all matching tool results have been appended.
+- Normalization never mutates the original Agent transcript, ChatMemory, callback payload, or trace.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Capability omitted | `supportsMultipleSystemMessages() == true` |
+| Built-in provider setter called | Instance capability changes and setter remains chainable |
+| Custom LLM uses default setter | `UnsupportedOperationException` (no silent no-op) |
+| Selector returns `null` | Empty parent context before child task is appended |
+| Selector returns parent system | Dropped before SubAgent execution |
+| Selector returns invisible note | Dropped before SubAgent execution |
+| Tool group misses a result or has an orphan result | Entire invalid fragment is dropped |
+
+### 5. Good / Base / Bad Cases
+
+- Good: declare `llm.supportsMultipleSystemMessages(false)` on the actual deployed model instance;
+  `SYSTEM` Skill content becomes a bounded user message only in the provider request.
+- Base: default capability `true` preserves existing multi-system behavior.
+- Bad: append parent system after the child system prompt or manually filter messages in every
+  application selector; both reintroduce provider-order and protocol bugs.
+
+### 6. Tests Required
+
+- Capability default/setter tests through the `LLM` interface.
+- First-system, non-leading-system, deferred-system, and idempotence tests.
+- SubAgent selector tests for parent system, invisible messages, complete and incomplete tool groups.
+- Full module and reactor Maven tests without an online provider.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```java
+if (llm instanceof VLLM) {
+    // Treat every vLLM deployment as if it has the same Chat Template capability.
+}
+```
+
+Correct:
+
+```java
+llm.supportsMultipleSystemMessages(false);
+// Agent keeps its internal transcript unchanged and normalizes only the request copy.
 ```
 
 ---

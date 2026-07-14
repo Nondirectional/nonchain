@@ -100,6 +100,12 @@ public class VLLM extends OpenAICompatibleLLM {
         return this;
     }
 
+    @Override
+    public VLLM supportsMultipleSystemMessages(boolean supported) {
+        super.supportsMultipleSystemMessages(supported);
+        return this;
+    }
+
     // ---- vLLM 特有参数 ----
 
     @Override

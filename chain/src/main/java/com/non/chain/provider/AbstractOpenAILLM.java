@@ -46,6 +46,7 @@ public abstract class AbstractOpenAILLM implements LLM {
     private Double temperature;
     private Double topP;
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
+    private boolean supportsMultipleSystemMessages = true;
 
     protected AbstractOpenAILLM(String baseUrl, String apiKey, String model) {
         this.client = OpenAIOkHttpClient.builder()
@@ -96,6 +97,20 @@ public abstract class AbstractOpenAILLM implements LLM {
     public AbstractOpenAILLM callback(ChainCallback callback) {
         this.callback = callback != null ? callback : ChainCallbackUtil.noop();
         return this;
+    }
+
+    /**
+     * 设置当前模型是否支持多条 system 消息。默认支持；能力属于具体模型实例，
+     * 不根据 provider 类型推断。
+     */
+    public AbstractOpenAILLM supportsMultipleSystemMessages(boolean supported) {
+        this.supportsMultipleSystemMessages = supported;
+        return this;
+    }
+
+    @Override
+    public boolean supportsMultipleSystemMessages() {
+        return supportsMultipleSystemMessages;
     }
 
     // ---- Protected accessors for subclasses ----
@@ -190,7 +205,9 @@ public abstract class AbstractOpenAILLM implements LLM {
 
         // LLM 边界过滤：应用层消息（llmVisible=false，如 UI 状态/通知）不进 provider 请求。
         // 静默剥离，遵循项目无日志框架约定；下方 default:throw 是唯一 fail-safe 信号。
-        for (Message msg : filterLlmVisible(messages)) {
+        List<Message> requestMessages = MessageNormalizer.normalizeForRequest(
+                messages, supportsMultipleSystemMessages());
+        for (Message msg : filterLlmVisible(requestMessages)) {
             switch (msg.role()) {
                 case "system":
                     builder.addSystemMessage(msg.content());
