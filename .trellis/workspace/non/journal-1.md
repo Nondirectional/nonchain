@@ -1527,3 +1527,37 @@ Refactor DashscopeLLM into multi-provider architecture, add generic OpenAI-compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 35: Release 0.11.0
+
+**Date**: 2026-07-15
+**Task**: Release 0.11.0
+**Branch**: `feat/skill-system`
+
+### Summary
+
+Bumped all reactor modules to 0.11.0, finalized release notes, synchronized public documentation, and verified the full Maven reactor plus examples.
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `dded87b` | (see git log) |
+| `ccee374` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
