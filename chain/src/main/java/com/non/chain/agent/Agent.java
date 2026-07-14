@@ -17,6 +17,8 @@ import com.non.chain.callback.event.ToolErrorEvent;
 import com.non.chain.callback.event.ToolStartEvent;
 import com.non.chain.memory.ChatMemory;
 import com.non.chain.provider.LLM;
+import com.non.chain.skill.SkillDefinition;
+import com.non.chain.skill.SkillRegistry;
 import com.non.chain.tool.Tool;
 import com.non.chain.tool.ToolCall;
 import com.non.chain.tool.ToolRegistry;
@@ -77,6 +79,9 @@ public class Agent {
     private final List<AfterToolCall> afterInterceptors;
     private final SubAgentExposureMode subAgentExposureMode;
 
+    /** skill 注册中心;null = 无 skill(行为与 0.10.0 一致)。 */
+    private final SkillRegistry skillRegistry;
+
     // ---- 后台子代理配置(D4)----
     private final ExecutorService backgroundExecutor;
     private final int maxBackgroundRunning;
@@ -104,6 +109,7 @@ public class Agent {
         this.beforeInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.beforeInterceptors));
         this.afterInterceptors = Collections.unmodifiableList(new ArrayList<>(builder.afterInterceptors));
         this.subAgentExposureMode = builder.subAgentExposureMode;
+        this.skillRegistry = builder.skillRegistry;
         this.backgroundExecutor = builder.backgroundExecutor;
         this.maxBackgroundRunning = builder.maxBackgroundRunning;
         this.spawnCeiling = builder.spawnCeiling != null ? builder.spawnCeiling
@@ -367,36 +373,58 @@ public class Agent {
                         // 并行执行多个工具调用，按源顺序组装结果。
                         final List<Message> parentSnapshot = List.copyOf(messages);
                         final SpanContext llmCtx = tracer != null ? Tracer.current() : null;
-                        @SuppressWarnings("unchecked")
-                        CompletableFuture<String>[] futures = new CompletableFuture[toolCalls.size()];
-                        for (int i = 0; i < toolCalls.size(); i++) {
-                            ToolCall tc = toolCalls.get(i);
-                            if (eventConsumer != null) {
-                                eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+
+                        // skill 在并行路径前置分流:skill 走独立路径(不进 executeWithToolSpan),
+                        // 其余 toolCall 进并行池。skill 与 tool 名在 build() 时已校验互斥。
+                        List<ToolCall> realToolCalls = new ArrayList<>();
+                        for (ToolCall tc : toolCalls) {
+                            if (skillRegistry != null && skillRegistry.contains(tc.name())) {
+                                DispatchResult dr = executeSkill(tc, eventConsumer);
+                                messages.add(Message.toolResult(tc.id(), dr.toolResultText));
+                                messages.addAll(dr.extraMessages);
+                            } else {
+                                realToolCalls.add(tc);
                             }
-                            final ToolCall finalTc = tc;
-                            futures[i] = CompletableFuture.supplyAsync(
-                                    () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId, runId, bgManager),
-                                    executor)
-                                    .whenComplete((output, err) -> {
-                                        if (eventConsumer != null) {
-                                            eventConsumer.accept(new AgentEvent.ToolEnd(finalTc.name(),
-                                                    err != null ? "工具执行失败: " + err.getMessage() : output));
-                                        }
-                                    });
                         }
-                        CompletableFuture.allOf(futures).join();
-                        for (int i = 0; i < toolCalls.size(); i++) {
-                            try {
-                                messages.add(Message.toolResult(toolCalls.get(i).id(), futures[i].get()));
-                            } catch (Exception e) {
-                                messages.add(Message.toolResult(toolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+
+                        if (!realToolCalls.isEmpty()) {
+                            @SuppressWarnings("unchecked")
+                            CompletableFuture<String>[] futures = new CompletableFuture[realToolCalls.size()];
+                            for (int i = 0; i < realToolCalls.size(); i++) {
+                                ToolCall tc = realToolCalls.get(i);
+                                if (eventConsumer != null) {
+                                    eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
+                                }
+                                final ToolCall finalTc = tc;
+                                futures[i] = CompletableFuture.supplyAsync(
+                                        () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId, runId, bgManager),
+                                        executor)
+                                        .whenComplete((output, err) -> {
+                                            if (eventConsumer != null) {
+                                                eventConsumer.accept(new AgentEvent.ToolEnd(finalTc.name(),
+                                                        err != null ? "工具执行失败: " + err.getMessage() : output));
+                                            }
+                                        });
+                            }
+                            CompletableFuture.allOf(futures).join();
+                            for (int i = 0; i < realToolCalls.size(); i++) {
+                                try {
+                                    messages.add(Message.toolResult(realToolCalls.get(i).id(), futures[i].get()));
+                                } catch (Exception e) {
+                                    messages.add(Message.toolResult(realToolCalls.get(i).id(), "工具执行失败: " + e.getMessage()));
+                                }
                             }
                         }
                     } else {
                         // 单个工具调用或未配置 executor，串行执行
                         final List<Message> parentSnapshot = List.copyOf(messages);
                         for (ToolCall tc : toolCalls) {
+                            if (skillRegistry != null && skillRegistry.contains(tc.name())) {
+                                DispatchResult dr = executeSkill(tc, eventConsumer);
+                                messages.add(Message.toolResult(tc.id(), dr.toolResultText));
+                                messages.addAll(dr.extraMessages);
+                                continue;
+                            }
                             if (eventConsumer != null) {
                                 eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                             }
@@ -560,6 +588,42 @@ public class Agent {
             long latencyMs = System.currentTimeMillis() - start;
             callback.onToolError(new ToolErrorEvent(traceId, tc.id(), tc.name(), tc.arguments(), e, latencyMs));
             throw new AgentException("工具拦截器执行失败: " + tc.name(), e);
+        }
+    }
+
+    /**
+     * Skill 注入执行:取出 skill content → 触发 SkillActivated 事件 → 产出 tool result 确认 +
+     * system 注入消息。skill 走独立路径,不经过 executeWithToolSpan/safeExecute(不碰 interceptor /
+     * Tool callback —— D9 锁定 skill 用自己的 SkillActivated 事件)。
+     *
+     * <p>注入位置由 V1 验证结论决定(design §4.5):system 消息(provider 层透明支持)。</p>
+     *
+     * @param tc             LLM 的 skill 点选调用(无参数)
+     * @param eventConsumer  AgentEvent 消费者(可能 null)
+     * @return tool result 文本 + 额外注入消息(skill 的 system 注入)
+     */
+    private DispatchResult executeSkill(ToolCall tc, java.util.function.Consumer<AgentEvent> eventConsumer) {
+        SkillDefinition def = skillRegistry.get(tc.name());
+        String content = def.content();
+
+        // D9: skill 激活事件(独立于 Tool callback)
+        if (eventConsumer != null) {
+            eventConsumer.accept(new AgentEvent.SkillActivated(def.name(), content.length()));
+        }
+
+        // D9: trace span(skill 激活节点;复用 TOOL 类型 + span name 区分,design §5.3)
+        Tracer.ScopedSpan skillSpan = tracer != null
+                ? tracer.startSpan(SpanAttributes.SpanType.TOOL, "skill:" + def.name()) : null;
+        try {
+            // 双消息注入(design §4.2):tool result(满足 tool-calling 协议)+ system 注入(知识)
+            // V1 验证确认 system 注入可行(design §4.5);fallback 到 user 仅改下面一行
+            String toolResultText = "(skill " + def.name() + " 已加载,详见系统指令)";
+            Message injection = Message.system(content);
+            return new DispatchResult(toolResultText, java.util.Collections.singletonList(injection));
+        } finally {
+            if (skillSpan != null) {
+                skillSpan.close();
+            }
         }
     }
 
@@ -804,6 +868,10 @@ public class Agent {
         }
         // D3/D6:有子代理时额外暴露控制工具
         tools.addAll(toolRegistry.getSubAgentControlTools());
+        // skill:无参数 function 拼在末尾(skillRegistry==null 时跳过,零影响)
+        if (skillRegistry != null) {
+            tools.addAll(skillRegistry.getSkillTools());
+        }
         return tools;
     }
 
@@ -876,6 +944,9 @@ public class Agent {
         private SubAgentExposureMode subAgentExposureMode = SubAgentExposureMode.DIRECT;
         private final List<BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<AfterToolCall> afterInterceptors = new ArrayList<>();
+
+        /** skill 注册中心;null = 无 skill。 */
+        private SkillRegistry skillRegistry;
 
         // ---- 后台子代理配置(D4)----
         private ExecutorService backgroundExecutor;       // 默认 null → run() 时按 maxBackgroundRunning 创建
@@ -1019,6 +1090,18 @@ public class Agent {
         }
 
         /**
+         * 注册 skill 中心。skill 是过程性知识/指令文本,LLM 通过 tool-calling 点选后注入
+         * system 消息。不调用则该 Agent 无 skill 能力,行为与 0.10.0 一致。
+         *
+         * <p>命名冲突在 {@link #build()} 时校验:skill 名不能与 tool 名 / sub-agent 名 /
+         * 框架保留名(delegate_to_subagent 等)重复,否则 fail-fast。</p>
+         */
+        public Builder skillRegistry(SkillRegistry skillRegistry) {
+            this.skillRegistry = skillRegistry;
+            return this;
+        }
+
+        /**
          * 设置 graceful max turns 的 grace 阶段轮数(D9)。
          *
          * <ul>
@@ -1111,6 +1194,10 @@ public class Agent {
             if (callback == null) {
                 callback = ChainCallbackUtil.noop();
             }
+            // D12: skill 命名冲突校验(skill 名不能与 tool / sub-agent / 框架保留名重复)
+            if (skillRegistry != null) {
+                validateSkillNaming(skillRegistry, toolRegistry);
+            }
             // 启用 trace 录制：构造 Tracer + RecordingCallback，并把录制 callback 与用户 callback 组合。
             // 用户面 callback 与录制 callback 是两个独立实例（design §4.2 边界1）：
             // SubAgent 用户隔离靠传 noop()（只隔离用户 callback），recordingCallback 单独注入下钻。
@@ -1123,6 +1210,29 @@ public class Agent {
                 this.callback = CompositeCallback.of(callback, recordingCallback);
             }
             return new Agent(this);
+        }
+
+        /**
+         * D12: skill 命名冲突校验。skill 名不能与已注册的 tool 名 / sub-agent 名 /
+         * 框架保留名(delegate_to_subagent / get_subagent_result / steer_subagent)重复,
+         * 否则 fail-fast 抛 IllegalStateException。
+         */
+        private static void validateSkillNaming(SkillRegistry sr, ToolRegistry tr) {
+            java.util.Set<String> reserved = new java.util.HashSet<>();
+            for (Tool t : tr.getRegularTools()) {
+                reserved.add(t.name());
+            }
+            reserved.addAll(tr.subAgentNames());
+            reserved.add(ToolRegistry.DELEGATE_TOOL_NAME);
+            reserved.add(ToolRegistry.GET_RESULT_TOOL_NAME);
+            reserved.add(ToolRegistry.STEER_TOOL_NAME);
+
+            for (String skillName : sr.skillNames()) {
+                if (reserved.contains(skillName)) {
+                    throw new IllegalStateException(
+                            "skill 名 '" + skillName + "' 与已注册的工具/子代理/保留名冲突");
+                }
+            }
         }
 
         /**
@@ -1141,6 +1251,26 @@ public class Agent {
         /** 复用已构造的 recordingCallback（SubAgent 注入用）。包级入口，框架内部使用。 */
         RecordingCallback recordingCallback() {
             return recordingCallback;
+        }
+    }
+
+    /**
+     * Skill 执行产物:tool result 文本 + system 注入消息。
+     *
+     * <p>仅 skill 路径使用(普通 tool / sub-agent 走 {@code dispatchExecute} 返回 String,不经此类型)。
+     * skill 被点选后,产出 tool result(满足 tool-calling 协议)+ system 注入(知识)两条消息。</p>
+     */
+    private static final class DispatchResult {
+        final String toolResultText;
+        final List<Message> extraMessages;
+
+        private DispatchResult(String toolResultText, List<Message> extraMessages) {
+            this.toolResultText = toolResultText;
+            this.extraMessages = extraMessages;
+        }
+
+        static DispatchResult of(String text, List<Message> extra) {
+            return new DispatchResult(text, extra);
         }
     }
 }

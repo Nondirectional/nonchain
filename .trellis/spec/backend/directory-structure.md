@@ -40,8 +40,8 @@ src/main/java/com/non/chain/
 │   ├── ToolParam.java        # Annotation: marks tool method parameters
 │   └── ToolRegistry.java     # Central registry: annotation scan + fluent API + SubAgent registration
 ├── agent/
-│   ├── Agent.java            # LLM + tool loop executor (Builder pattern, memory/callback/streaming/interceptors/graceful/steer/bgSubAgent)
-│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/... + SubAgent lifecycle events)
+│   ├── Agent.java            # LLM + tool loop executor (Builder pattern, memory/callback/streaming/interceptors/graceful/steer/bgSubAgent/skill)
+│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/... + SubAgent lifecycle + SkillActivated events)
 │   ├── AgentException.java   # Unchecked exception for agent loop failures
 │   ├── BeforeToolCall.java   # Interceptor: before tool execution (can block)
 │   ├── AfterToolCall.java    # Interceptor: after tool execution (can rewrite result)
@@ -56,6 +56,9 @@ src/main/java/com/non/chain/
 │   ├── SubAgentRecord.java        # Background sub-agent runtime state: future/status/result/steers/childAgent
 │   ├── BackgroundSubAgentManager.java  # Background orchestration: thread pool/queue/circuit-breaker/join/awaitAll (scoped to one run())
 │   └── JoinResult.java            # Round-end join product: mergedMessage() from completed background results
+├── skill/                        # Skill system: procedural knowledge injection (LLM-selectable, system-message injection)
+│   ├── SkillDefinition.java      # Immutable value object: skill config (name/description/content)
+│   └── SkillRegistry.java        # Registry: fluent + value-object registration, getSkillTools() → paramless Tool for LLM schema
 ├── flow/
 │   ├── Node.java             # Workflow node: wraps a Function<State, State>
 │   ├── Edge.java             # Workflow edge: unconditional or conditional routing
@@ -104,6 +107,15 @@ Delegated sub-agents are registered in `ToolRegistry`, exposed by `Agent.Builder
 5. Only runs inside the `Agent` auto-loop; hand-written `registry.execute("subAgent", ...)` fails fast
 6. Background/background-parallel: parent LLM passes `run_in_background=true` (D11 call-level); background orchestration via `BackgroundSubAgentManager` (scoped to one `run()`, independent thread pool, max-running + circuit-breaker). `get_subagent_result` / `steer_subagent` tools auto-exposed when sub-agents exist.
 7. Parent `Agent` graceful: `.graceTurns(n)` (default 3; **0 = fallback to 0.9.x hard-cutoff throwing `AgentException`**). `.graceTurns(0)` is the only path that throws on maxIterations exceeded.
+
+### Registering a skill (procedural knowledge injection)
+Skills are **processual knowledge text** (not executable tools) — they tell the Agent *how* to do something. The LLM self-selects a skill via tool-calling; on selection, the skill's content is injected as a `system` message. Skills live in an independent `SkillRegistry` (parallel to `ToolRegistry`):
+1. Create `SkillRegistry`, register skills via fluent `registry.register(name, description).content(text).build()` or `registry.register(SkillDefinition)`
+2. `Agent.builder(llm, toolRegistry).skillRegistry(skillRegistry)` — skillRegistry is optional (null = no skill, 0.10.0 behavior)
+3. Each skill appears in the LLM function list as a **paramless function** (description prefixed `[Skill]`); LLM self-selects based on user intent — recall quality depends on description accuracy
+4. On selection, `executeSkill` produces two messages: `tool result` (protocol ack) + `Message.system(content)` (knowledge injection, PERSISTENT)
+5. Skills bypass `executeWithToolSpan`/`safeExecute`/`dispatchExecute` entirely (no interceptor, no Tool callback); activation fires `AgentEvent.SkillActivated` + a trace span (SpanType.TOOL, name `skill:<name>`)
+6. **Naming conflict guard (D12)**: `build()` validates skill names don't collide with tool names / sub-agent names / reserved names (`delegate_to_subagent`, `get_subagent_result`, `steer_subagent`) — fail-fast `IllegalStateException`
 
 ### Adding a new workflow pattern
 1. Define `Node` instances with `Function<State, State>` processors

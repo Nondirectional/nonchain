@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **Skill（过程性知识注入）**：引入 `com.non.chain.skill` 包（`SkillDefinition` + `SkillRegistry`），Agent 可通过 `.skillRegistry()` 挂载过程性知识。LLM 通过 tool-calling 自主点选 skill（在 function 列表里以无参数 function 出现，description 带 `[Skill]` 前缀），点选后内容作为 `system` 消息注入对话（PERSISTENT 常驻）。skill 走独立执行路径，不经过 tool 拦截器；激活时触发 `AgentEvent.SkillActivated` 事件 + trace span。`build()` 时校验 skill 名与 tool/sub-agent/保留名互斥（fail-fast）。
+
 ## [0.10.0] - 2026-07-09
 
 ### ⚠️ 破坏性变更

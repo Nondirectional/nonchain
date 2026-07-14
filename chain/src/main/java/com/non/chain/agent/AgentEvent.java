@@ -286,4 +286,22 @@ public interface AgentEvent {
         public String subAgentId() { return subAgentId; }
         public String name() { return name; }
     }
+
+    /**
+     * Skill 被激活(过程性知识注入 system 消息)。
+     *
+     * <p>{@code contentLength} 为注入内容长度(不存全文——全文在对话 messages 里)。</p>
+     */
+    class SkillActivated implements AgentEvent {
+        private final String skillName;
+        private final int contentLength;
+
+        public SkillActivated(String skillName, int contentLength) {
+            this.skillName = skillName;
+            this.contentLength = contentLength;
+        }
+
+        public String skillName() { return skillName; }
+        public int contentLength() { return contentLength; }
+    }
 }

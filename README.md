@@ -9,6 +9,7 @@
 - **工具函数框架** — 注解驱动 + 流式 API 两种方式定义工具，自动注册与调度
 - **Agent 循环** — LLM + 工具自动调用循环，Builder 模式，支持 ChainCallback 统一回调、流式事件输出、工具并行执行、工具拦截器（before/after，可阻止/改写工具调用）、委派型子代理（SubAgent，父 Agent 自主委派子任务并拿回结果）与前台/后台并行执行（后台子代理不阻塞父 Agent，自动 join 结果 + 运行中 steer 转向 + 会话 resume + graceful max turns）
 - **应用层消息分层** — `Message.note()` 产生 UI-only 状态消息（"正在思考"、"已读取文件"），进 transcript 供 UI 重放，在 LLM 边界被剥离不污染上下文
+- **Skill（过程性知识注入）** — 过程性知识/指令文本，LLM 通过 tool-calling 自主点选后作为 system 消息注入对话，指导 Agent 行为方式（不含可执行工具）；独立 `SkillRegistry` 注册，模型自选触发，PERSISTENT 常驻
 - **图工作流引擎** — 基于有向图的多步骤工作流编排，支持条件路由和事件回调
 - **多模态输入** — 支持文本 + 图片混合消息，配合视觉模型进行图片理解
 - **文档处理** — 支持 TXT/Markdown/HTML/DOCX/PDF 解析，含 OCR 和清洗管道
@@ -256,6 +257,29 @@ Agent agent = Agent.builder(llm, registry)
 - **死循环防护**：join 只注入已完成结果不 spawn 新任务；spawn 受熔断；Complete 前有全局超时（默认 60s）
 
 > **拦截器边界**：父 Agent 的 `before/after` 拦截器作用于外层子代理 tool 调用（可阻止/改写整次委派）；子代理注册时配置的拦截器仅作用于子代理内部工具，不继承父拦截器。
+
+### Skill（过程性知识注入）
+
+Skill 是**过程性知识/指令文本**——告诉 Agent「怎么做某事」的过程性知识。当相关场景出现时，LLM 通过 tool-calling 自主点选 skill，skill 内容作为 **system 消息**注入对话，指导 Agent 后续行为。skill 本身不含可执行工具，是知识/指令层的东西（区别于 Tool 的「执行有副作用的动作」）。
+
+```java
+SkillRegistry skillRegistry = new SkillRegistry();
+skillRegistry.register("code-review", "当用户请求审查代码时使用")
+        .content("# 代码审查流程\n1. 看整体结构\n2. 看命名规范\n3. ...")
+        .build();
+
+Agent agent = Agent.builder(llm, registry)
+        .skillRegistry(skillRegistry)    // 挂载 skill
+        .build();
+// 用户提问后，LLM 在 function 列表里看到 [Skill] code-review，自主决定是否点选
+```
+
+- **模型自选触发**：skill 在 LLM 的 function 列表里以**无参数 function** 出现（description 带 `[Skill]` 前缀），LLM 根据用户意图自主点选——召回质量取决于 description 写得是否准确
+- **system 注入**：点选后产出两条消息——`tool result`（满足 tool-calling 协议）+ `Message.system(content)`（注入知识，作为持续生效的行为指令）
+- **PERSISTENT 常驻**：注入的 system 消息常驻整轮对话，多 skill 可叠加共存
+- **不走拦截器**：skill 无副作用，不经过 `before/after` tool 拦截器；激活时触发独立的 `AgentEvent.SkillActivated` 事件 + trace span
+- **命名防护**：skill 名不能与 tool 名 / sub-agent 名 / 框架保留名重复，`build()` 时 fail-fast
+- **独立包**：`com.non.chain.skill`（`SkillDefinition` + `SkillRegistry`），与 tool/agent 平行
 
 ### 应用层消息与 LLM 消息分层
 
