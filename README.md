@@ -43,7 +43,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.8.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -53,7 +53,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.8.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -63,9 +63,7 @@ Elasticsearch 向量存储（可选）：
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.8.0</version>
-```
-
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -231,7 +229,7 @@ Agent agent = Agent.builder(llm, registry)
 
 - 子代理默认**无状态**：独立 `systemPrompt`、独立工具集、独立 `before/after` 拦截器、独立 `maxIterations`，默认**继承父 LLM**
 - **Skill 预加载（D13）**：子代理可通过 `.skillRegistry(skills)` 挂载 skill，委派执行时子 agent 可像顶层 Agent 一样按需点选 skill（继承父 Agent 的注入模式）；子代理范围内的 skill 名 vs tool 名冲突自动校验
-- **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**不含父 `systemPrompt`**）；可在注册时用 `contextSelector(...)` 覆盖默认裁剪策略
+- **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**隔离全部父 `system` 消息**，并移除不完整的 assistant/tool 调用组）；可在注册时用 `contextSelector(...)` 覆盖裁剪窗口，但不能绕过这些安全边界
 - **callback / event / trace 边界**：父侧 `ChainCallback` 仍把子代理视为一次普通工具调用；传入 `eventConsumer` 时，子代理内部事件通过 `AgentEvent.SubAgentProgress` 包装转发（含调用 ID、名称、任务、父 tool-call ID、原始事件），后台生命周期事件继续由 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 提供；Trace 记录完整嵌套 span 树
 - **错误语义**：子代理整体失败 → 外层记 `ToolErrorEvent` 并把错误文本回灌父 Agent，父循环继续
 - **graceful max turns（⚠️ 0.10.0 破坏性变更）**：超 `maxIterations` 不再抛异常，改为注入「收尾」提示给 `graceTurns`（默认 3）轮收尾，超时返回部分结果（标 `ABORTED`/`STEERED`）。`.graceTurns(0)` 回退 0.9.x 硬截断（抛 `AgentException`）
@@ -261,7 +259,7 @@ Agent agent = Agent.builder(llm, registry)
 
 ### Skill（过程性知识注入）
 
-Skill 是**过程性知识/指令文本**——告诉 Agent「怎么做某事」的过程性知识。当相关场景出现时，LLM 通过 tool-calling 自主点选 skill，skill 内容按注入模式进入对话，指导 Agent 后续行为。默认使用 **system 消息**；不支持多条 system 消息的模型 Chat Template 可显式切换为 **user 消息**。skill 本身不含可执行工具，是知识/指令层的东西（区别于 Tool 的「执行有副作用的动作」）。
+Skill 是**过程性知识/指令文本**——告诉 Agent「怎么做某事」的过程性知识。当相关场景出现时，LLM 通过 tool-calling 自主点选 skill，skill 内容按注入模式进入对话，指导 Agent 后续行为。默认使用 **system 消息**；既可显式切换为 **user 消息**，也可让 LLM 实例声明不支持多 system，由请求边界自动兼容转换。skill 本身不含可执行工具，是知识/指令层的东西（区别于 Tool 的「执行有副作用的动作」）。
 
 ```java
 SkillRegistry skillRegistry = new SkillRegistry();
@@ -269,15 +267,17 @@ skillRegistry.register("code-review", "当用户请求审查代码时使用")
         .content("# 代码审查流程\n1. 看整体结构\n2. 看命名规范\n3. ...")
         .build();
 
+// llm.supportsMultipleSystemMessages(false); // 模型 Chat Template 不支持多 system 时启用
 Agent agent = Agent.builder(llm, registry)
         .skillRegistry(skillRegistry)    // 挂载 skill
-        // .skillInjectionMode(SkillInjectionMode.USER) // 可选：模型不支持多条 system 消息时启用
+        // .skillInjectionMode(SkillInjectionMode.USER) // 可选：始终按带 Skill 边界的 user 消息注入
         .build();
 // 用户提问后，LLM 在 function 列表里看到 [Skill] code-review，自主决定是否点选
 ```
 
 - **模型自选触发**：skill 在 LLM 的 function 列表里以**无参数 function** 出现（description 带 `[Skill]` 前缀），LLM 根据用户意图自主点选——召回质量取决于 description 写得是否准确
-- **注入模式**：默认 `SYSTEM`，点选后产出 `tool result`（满足 tool-calling 协议）+ `Message.system(content)`；对不支持多条 system 消息的模型，调用 `.skillInjectionMode(SkillInjectionMode.USER)`，内容将以带 `[Skill: name]` 边界的 user 消息注入
+- **注入模式**：默认 `SYSTEM`，点选后产出 `tool result`（满足 tool-calling 协议）+ `Message.system(content)`；显式 `.skillInjectionMode(SkillInjectionMode.USER)` 时，内容以带 `[Skill: name]` 边界的 user 消息注入
+- **请求边界兼容**：对不支持多 system 的具体模型实例调用 `.supportsMultipleSystemMessages(false)`；框架只在请求副本中保留首条 system，并把后续 system 转成带 `[Framework System Instruction]` 边界的 user 消息，原始 transcript / memory / event / trace 不变
 - **PERSISTENT 常驻**：注入消息常驻整轮对话，多 skill 可叠加共存
 - **不走拦截器**：skill 无副作用，不经过 `before/after` tool 拦截器；激活时触发独立的 `AgentEvent.SkillActivated` 事件 + trace span
 - **命名防护**：skill 名不能与 tool 名 / sub-agent 名 / 框架保留名重复，`build()` 时 fail-fast

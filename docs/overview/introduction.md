@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-nonchain 是一个轻量级的 Java AI 应用开发框架，当前版本 0.7.0。它为开发者提供了一套完整的 AI 应用构建工具链，涵盖大语言模型（LLM）调用、工具函数管理、工作流编排、文档处理、知识检索和对话记忆等核心能力。
+nonchain 是一个轻量级的 Java AI 应用开发框架，当前版本 0.11.0。它为开发者提供了一套完整的 AI 应用构建工具链，涵盖大语言模型（LLM）调用、Agent 与过程性 Skill、工具函数管理、工作流编排、文档处理、知识检索、对话记忆和执行链路遥测等核心能力。
 
 ### 项目目标
 
@@ -17,13 +17,14 @@ nonchain 的核心设计目标是：
 
 ### LLM Provider 抽象
 
-通过统一的 `LLM` 接口抽象大语言模型的调用方式。当前已内置阿里云 DashScope（通义千问系列）的实现，支持多种调用方式：
+通过统一的 `LLM` 接口抽象大语言模型的调用方式。当前内置 `DashscopeLLM`、`OpenAICompatibleLLM` 和 `VLLM`，支持多种调用方式：
 
 - 简单对话（系统提示 + 用户消息）
 - 多轮对话（消息列表）
 - 工具调用（携带工具定义）
 - 结构化输出（JSON Object 格式）
 - 多模态输入（文本 + 图片混合消息）
+- Chat Template 能力声明：对不支持多 system 消息的模型调用 `supportsMultipleSystemMessages(false)`，框架仅归一化请求副本，不修改原始对话
 
 ### 工具函数框架
 
@@ -33,6 +34,16 @@ nonchain 的核心设计目标是：
 - **流式 API 方式** — 使用链式调用（`register().param().handle()`）手动注册工具
 
 LLM 返回的工具调用指令可通过 `ToolRegistry.execute()` 统一执行，支持自动类型转换。
+
+### Agent、SubAgent 与 Skill
+
+`Agent` 封装 LLM + Tool 自动调用循环，并提供可组合的执行能力：
+
+- **委派型 SubAgent** — 支持 DIRECT/DELEGATE 暴露、前台/后台运行、运行中 steer、会话 resume、并发控制和 graceful max turns
+- **过程性 Skill** — `SkillRegistry` 注册过程性知识，模型以无参数 function 自主点选；默认按 system 注入，也可配置 `SkillInjectionMode.USER`
+- **子代理 Skill 预加载** — `SubAgentRegistration.skillRegistry(...)` 为专职子代理挂载独立 Skill 集
+- **实时事件** — `AgentEvent.SubAgentProgress` 包装子代理内部轮次、文本、工具、Skill 和完成/错误事件，并携带稳定调用上下文
+- **安全上下文边界** — SubAgent 自动隔离父 system、过滤不可见消息，并保证 assistant/tool 调用组完整
 
 ### 图工作流引擎
 
@@ -142,8 +153,9 @@ nonchain 采用分层架构设计，各层之间通过接口解耦：
 
 | 模块 | Maven artifactId | 说明 |
 |------|-----------------|------|
-| `chain` | `chain` | 核心模块：LLM 抽象（`LLM`、`DashscopeLLM`）、工具函数（`ToolRegistry`）、图工作流（`Graph`、`Node`、`Edge`、`State`）、知识存储接口（`KnowledgeStore`、`SearchRequest`、`SearchResult`、`ContextExpansionRequest`、`ContextExpansionResponse`）、文档模型（`DocumentReader`、`ParsedDocument`、`DocumentElement`）、Embedding（`EmbeddingModel`、`DashScopeEmbeddingModel`）、多模态消息（`Message`、`ContentPart`、`TextPart`、`ImageUrlPart`）、文档切分接口（`DocumentSplitter`、`TextChunk`） |
+| `chain` | `chain` | 核心模块：LLM 抽象与 provider、Agent/SubAgent、Skill、工具函数、图工作流、知识存储接口、Embedding、多模态消息、对话记忆、文档模型/切分接口和 Trace Telemetry |
 | `chain-document` | `chain-document` | 文档处理模块：TXT/MD/HTML/DOCX/PDF 格式解析器、OCR 引擎（Tesseract / RapidOCR）、清洗管道（`CleanerPipeline`，包含 7 种清洗器）、5 种文档切分策略实现、内容度量（字符数 / Token 数） |
 | `chain-elasticsearch` | `chain-elasticsearch` | Elasticsearch 集成模块：`ElasticsearchKnowledgeStore`（统一检索入口，支持 kNN / BM25 / Hybrid）、`ElasticsearchBM25Retriever`（专用 BM25 包装器）、`HybridRetriever`（原生 retriever 混合检索包装器） |
-| `chain-example` | `chain-example` | 示例模块：包含 22 个可运行的示例程序，覆盖框架的所有功能特性 |
-| `chain-mysql` | `chain-mysql` | MySQL 持久化模块：`MysqlChatMemoryStore`（JDBC + DataSource）、`MessageSerializer`（JSON 序列化） |
+| `chain-example` | `chain-example` | 示例模块：包含 34 个可运行的示例程序，覆盖框架的所有功能特性 |
+| `chain-mysql` | `chain-mysql` | MySQL 持久化模块：`MysqlChatMemoryStore` 与 `MysqlTraceStore` |
+| `chain-postgres` | `chain-postgres` | PostgreSQL 持久化模块：`PostgresChatMemoryStore` 与 `PostgresTraceStore` |

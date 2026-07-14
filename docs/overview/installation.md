@@ -62,7 +62,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -80,7 +80,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -131,7 +131,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 
@@ -154,14 +154,14 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
 
     <!-- 文档处理模块 -->
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
 
     <!-- 文档解析 optional 依赖 -->
@@ -195,7 +195,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
 </dependencies>
 ```

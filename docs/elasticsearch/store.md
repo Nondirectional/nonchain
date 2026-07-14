@@ -17,7 +17,7 @@
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 

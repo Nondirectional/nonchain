@@ -1,6 +1,6 @@
 # 示例代码
 
-`chain-example` 模块包含 30 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
+`chain-example` 模块包含 34 个完整的示例程序，涵盖 nonchain 框架的所有核心功能。每个示例都可以独立运行，帮助快速理解和使用各个模块。
 
 ## 运行示例
 
@@ -51,11 +51,17 @@ mvn compile exec:java -pl chain-example \
 | `FunctionCallMultiParamExample` | 多参数工具：注解 vs 流式对比 |
 | `StructuredOutputExample` | JSON Object 结构化输出 |
 | `ImageInputExample` | 多模态图片输入 |
+| `StreamingChatExample` | LLM 流式输出：文本、思考内容和工具调用增量 |
+| `VLLMExample` | vLLM provider：thinking 模式与思考预算配置 |
 | `VLLMMultimodalExample` | vLLM 多模态：URL、本地文件、base64 图片输入 |
+| `LocalModelSmokeTestExample` | 本地 LLM、Embedding、Reranker 服务连通性验证 |
 | `AgentLoopExample` | Agent 循环：旅行助手多工具多步骤推理 |
 | `StreamingAgentExample` | Agent 流式输出：实时接收 LLM 文本/工具调用事件 |
 | `ToolInterceptorExample` | 工具拦截器：before 审核危险命令、after 结果脱敏 |
 | `SubAgentExample` | 委派型子代理：DIRECT/DELEGATE 两种暴露模式，主 Agent 委派调研/撰写子代理 |
+| `BackgroundSubAgentExample` | 后台子代理：并发执行、结果 join、查询与 steer |
+| `SkillExample` | Skill 过程性知识注入：模型自主点选与注入模式配置 |
+| `SubAgentSkillExample` | SubAgent + Skill：预加载检查清单并实时观察子代理事件 |
 | `TraceTelemetryExample` | 执行链路遥测：录制 Agent/SubAgent/Flow 整棵 span 树，按 runtimeId 拉回并序列化为 JSON |
 | `MessageLayeringExample` | 应用层消息分层：UI 状态消息进 transcript 不进 LLM |
 
@@ -115,6 +121,60 @@ mvn compile exec:java -pl chain-example \
 
 前置条件：
 - vLLM 服务运行中，且部署了视觉模型
+
+#### StreamingChatExample
+
+演示 `streamChat(...)` 的文本、思考内容和工具调用增量回调。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.StreamingChatExample"
+```
+
+#### VLLMExample
+
+演示 `VLLM` provider 的 thinking 模式、思考预算和 OpenAI 兼容调用配置。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.VLLMExample"
+```
+
+#### LocalModelSmokeTestExample
+
+验证本地部署的 LLM、Embedding 和 Reranker 三类服务是否可用。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.LocalModelSmokeTestExample"
+```
+
+#### BackgroundSubAgentExample
+
+演示后台 SubAgent 并发、自动 join、`get_subagent_result` 查询和运行中 steer。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.BackgroundSubAgentExample"
+```
+
+#### SkillExample
+
+演示使用 `SkillRegistry` 注册 PRD 审查与 Git 分支命名知识，由 LLM 自主点选，并展示 `SkillInjectionMode.USER` 配置。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.SkillExample"
+```
+
+#### SubAgentSkillExample
+
+演示给代码审查子代理预加载 OWASP Skill，并通过 `AgentEvent.SubAgentProgress` 观察子代理内部 Round、Tool、Skill、Text、Error 和 Complete 事件。
+
+```bash
+mvn compile exec:java -pl chain-example \
+    -Dexec.mainClass="com.non.chain.example.SubAgentSkillExample"
+```
 
 #### MessageLayeringExample
 
@@ -340,17 +400,17 @@ mvn compile exec:java -pl chain-example \
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
     <dependency>
         <groupId>com.non</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.4.0</version>
+        <version>0.11.0</version>
     </dependency>
     <!-- LLM API -->
     <dependency>
@@ -395,8 +455,9 @@ mvn compile exec:java -pl chain-example \
 
 ## 推荐学习路径
 
-1. **LLM 基础**：`FunctionCallExample` -> `StructuredOutputExample` -> `ImageInputExample` -> `VLLMMultimodalExample`
-2. **文档处理**：`TxtDocumentReaderExample` -> `MarkdownDocumentReaderExample` -> `PdfDocumentReaderExample` -> `DocumentCleanerExample`
-3. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample` -> `LlmDocumentSplitterExample`
-4. **统一检索**：`EmbeddingModelExample` -> `ElasticsearchHybridExample` -> `GraphKnowledgeExample`
-5. **工作流**：`EasyWorkflowExample` -> `GraphKnowledgeExample`
+1. **LLM 基础**：`FunctionCallExample` -> `StreamingChatExample` -> `StructuredOutputExample` -> `ImageInputExample` -> `VLLMMultimodalExample`
+2. **Agent 与 Skill**：`AgentLoopExample` -> `SubAgentExample` -> `BackgroundSubAgentExample` -> `SkillExample` -> `SubAgentSkillExample`
+3. **文档处理**：`TxtDocumentReaderExample` -> `MarkdownDocumentReaderExample` -> `PdfDocumentReaderExample` -> `DocumentCleanerExample`
+4. **文档切分**：`RecursiveCharacterSplitterExample` -> `HeaderDocumentSplitterExample` -> `CompositeDocumentSplitterExample` -> `SemanticSplitterExample` -> `LlmDocumentSplitterExample`
+5. **统一检索**：`EmbeddingModelExample` -> `ElasticsearchHybridExample` -> `GraphKnowledgeExample`
+6. **工作流**：`EasyWorkflowExample` -> `GraphKnowledgeExample`

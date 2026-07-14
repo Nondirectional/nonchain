@@ -1,10 +1,10 @@
 # Message 消息模型
 
-`Message` 类是 nonchain 框架中表示聊天消息的核心数据类。它封装了对话中各角色的消息内容，支持纯文本消息、多模态消息（文本 + 图片）、工具调用消息和工具结果消息。
+`Message` 类是 nonchain 框架中表示聊天消息的核心数据类。它封装了对话中各角色的消息内容，支持纯文本消息、多模态消息（文本 + 图片）、工具调用消息、工具结果消息和仅应用层可见的 note 消息。
 
 ## 消息角色
 
-`Message` 支持以下四种角色（role）：
+`Message` 支持以下角色（role）：
 
 | 角色 | 说明 |
 |------|------|
@@ -12,6 +12,7 @@
 | `user` | 用户消息，表示用户的输入 |
 | `assistant` | 助手消息，表示模型的回复 |
 | `tool` | 工具结果消息，表示工具执行的返回结果 |
+| `note` | 应用层状态消息，默认 `llmVisible=false`，保留在 transcript 但不发送给模型 |
 
 ## 静态工厂方法
 
@@ -25,6 +26,7 @@
 | `assistant(String content)` | 创建助手消息 | `content` - 助手回复的文本内容 |
 | `assistantWithToolCalls(String content, List<ToolCall> toolCalls)` | 创建带工具调用的助手消息 | `content` - 助手回复内容，`toolCalls` - 工具调用列表 |
 | `toolResult(String toolCallId, String content)` | 创建工具结果消息 | `toolCallId` - 工具调用 ID，`content` - 工具执行结果 |
+| `note(String kind, String content)` | 创建应用层 note 消息 | `kind` - 业务语义标签，`content` - 展示内容 |
 
 ## 字段说明
 
@@ -35,6 +37,8 @@
 | `contentParts` | `List<ContentPart>` | 多模态内容部件（仅多模态用户消息使用） |
 | `toolCallId` | `String` | 工具调用 ID（仅工具结果消息使用） |
 | `toolCalls` | `List<ToolCall>` | 工具调用列表（仅带工具调用的助手消息使用） |
+| `llmVisible` | `boolean` | 是否进入 LLM 请求；普通消息默认 `true`，note 默认 `false` |
+| `kind` | `String` | 可选应用层语义标签，如 `status` / `ui` |
 
 ## 访问器方法
 
@@ -44,6 +48,8 @@ String content()                 // 获取文本内容
 List<ContentPart> contentParts() // 获取多模态内容部件
 String toolCallId()              // 获取工具调用 ID
 List<ToolCall> toolCalls()       // 获取工具调用列表
+boolean llmVisible()             // 是否进入 LLM 请求
+String kind()                    // 获取应用层语义标签
 ```
 
 ## ContentPart 接口
@@ -226,13 +232,32 @@ ChatResult result2 = llm.chat(messages);
 System.out.println(result2.content());  // 输出: 你叫小明
 ```
 
+## 多 system 消息兼容
+
+不同模型的 Chat Template 对 `system` 消息数量和位置要求不同。`LLM` 默认声明支持多条 system；对实际不支持的模型实例，应显式关闭该能力：
+
+```java
+LLM llm = new OpenAICompatibleLLM("http://localhost:8000/v1", "model-name")
+        .supportsMultipleSystemMessages(false);
+```
+
+关闭后，`prepareMessages(...)` 在每次请求前创建并归一化消息副本：
+
+- 第一条可见消息是 system 时保留该消息；后续 system 转为带 `[Framework System Instruction]` 边界的 user 消息
+- 第一条可见消息不是 system 时，所有 system 都转换为上述 user 消息
+- 转换不会插入 assistant(toolCalls) 与其连续 tool result 之间，避免破坏工具调用协议
+- 原始 Agent transcript、ChatMemory、callback 事件和 trace 载荷保持原角色与顺序
+- `llmVisible=false` 消息不会进入模型请求
+
+`DashscopeLLM`、`OpenAICompatibleLLM` 和 `VLLM` 提供可链式 setter。自定义 `LLM` 默认仍返回 `supportsMultipleSystemMessages() == true`；若需要运行时切换，应覆写 setter 或 `prepareMessages(...)`，默认 setter 会抛出 `UnsupportedOperationException`，避免静默忽略配置。
+
 ## 依赖
 
 ```xml
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 

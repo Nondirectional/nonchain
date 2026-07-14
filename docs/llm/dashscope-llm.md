@@ -20,7 +20,7 @@ export DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 <dependency>
     <groupId>com.non</groupId>
     <artifactId>chain</artifactId>
-    <version>0.4.0</version>
+    <version>0.11.0</version>
 </dependency>
 ```
 

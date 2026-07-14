@@ -4,12 +4,17 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
-## [Unreleased]
+## [0.11.0] - 2026-07-15
 
 ### 新增
 
-- **Skill（过程性知识注入）**：引入 `com.non.chain.skill` 包（`SkillDefinition` + `SkillRegistry`），Agent 可通过 `.skillRegistry()` 挂载过程性知识。LLM 通过 tool-calling 自主点选 skill（在 function 列表里以无参数 function 出现，description 带 `[Skill]` 前缀），点选后内容作为 `system` 消息注入对话（PERSISTENT 常驻）。skill 走独立执行路径，不经过 tool 拦截器；激活时触发 `AgentEvent.SkillActivated` 事件 + trace span。`build()` 时校验 skill 名与 tool/sub-agent/保留名互斥（fail-fast）。
-- **SubAgent Skill 预加载（D13）**：`SubAgentRegistration.skillRegistry(SkillRegistry)` 允许子代理挂载 skill。委派执行时子 agent 可像顶层 Agent 一样按需点选 skill。子 agent 范围内的 skill 名 vs tool 名冲突在委派构造时自动校验（复用 `validateSkillNaming`）。填补 SubAgent 重做裁剪清单 D13 的坑。
+- **Skill（过程性知识注入）**：引入 `com.non.chain.skill` 包（`SkillDefinition` + `SkillRegistry`），Agent 可通过 `.skillRegistry()` 挂载过程性知识。LLM 通过 tool-calling 自主点选 skill（在 function 列表里以无参数 function 出现，description 带 `[Skill]` 前缀），点选后内容按 `SkillInjectionMode` 注入对话（默认 `SYSTEM`，可显式改为带 `[Skill: name]` 边界的 `USER`，PERSISTENT 常驻）。skill 走独立执行路径，不经过 tool 拦截器；激活时触发 `AgentEvent.SkillActivated` 事件 + trace span。`build()` 时校验 skill 名与 tool/sub-agent/保留名互斥（fail-fast）。
+- **SubAgent Skill 预加载（D13）**：`SubAgentRegistration.skillRegistry(SkillRegistry)` 允许子代理挂载 skill。委派执行时子 agent 可像顶层 Agent 一样按需点选 skill，并继承父 Agent 的 Skill 注入模式。子 agent 范围内的 skill 名与 tool 名冲突在委派构造时自动校验（复用 `validateSkillNaming`）。
+- **SubAgent 实时过程事件**：父 Agent 配置 `eventConsumer` 后，前台和后台子代理的内部 `AgentEvent` 会通过 `AgentEvent.SubAgentProgress` 包装转发，携带稳定调用 ID、子代理名称、任务、父 tool-call ID、前后台标记和原始子事件。单次调用内保持事件顺序；后台并发事件可交错，消费者异常不会影响子代理业务结果。既有 `ChainCallback` 隔离、Trace 全树下钻和后台生命周期事件语义保持不变。
+
+### 修复
+
+- **SubAgent 上下文与多 system Chat Template 兼容**：子代理入口统一隔离父 `system` 消息、过滤 `llmVisible=false` 消息，并移除不完整的 assistant/tool 调用组。`LLM` 新增向后兼容的 `supportsMultipleSystemMessages()` / `supportsMultipleSystemMessages(boolean)` / `prepareMessages(...)` 契约；对显式声明不支持多 system 的模型，仅在请求副本中保留首条 system，并把后续 system 转为带 `[Framework System Instruction]` 边界的 user 消息，且不打断工具调用组。原始 Agent transcript、ChatMemory、callback 和 trace 载荷不变。
 
 ## [0.10.0] - 2026-07-09
 
