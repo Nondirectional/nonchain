@@ -16,6 +16,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -49,9 +50,13 @@ public class SubAgentSkillTest {
                 .content("# 审查清单\n1. 看结构\n2. 看安全")
                 .build();
 
+        ToolRegistry childTools = new ToolRegistry();
+        childTools.register("check", "执行检查").handle(args -> "checked");
+
         ToolRegistry registry = new ToolRegistry();
         registry.registerSubAgent("reviewer", "负责代码审查")
                 .systemPrompt("你是代码审查代理。")
+                .toolRegistry(childTools)
                 .skillRegistry(childSkills)
                 .maxIterations(5)
                 .build();
@@ -60,12 +65,14 @@ public class SubAgentSkillTest {
         MockLLM llm = new MockLLM(Arrays.asList(
                 toolCall("c1", "reviewer", "{\"task\":\"审查这段代码\"}"),
                 toolCall("s1", "review-checklist", "{}"),
+                toolCall("s2", "check", "{}"),
                 reply("按审查清单,结构清晰但缺少空指针检查。"),
                 reply("审查完成:代码基本合格,建议补充空指针检查。")
         ));
 
         Agent agent = Agent.builder(llm, registry).build();
-        ChatResult result = agent.run("帮我审查代码");
+        List<AgentEvent> events = Collections.synchronizedList(new ArrayList<>());
+        ChatResult result = agent.run("帮我审查代码", events::add);
 
         assertEquals("审查完成:代码基本合格,建议补充空指针检查。", result.content());
 
@@ -93,6 +100,71 @@ public class SubAgentSkillTest {
             }
         }
         assertTrue("子 agent 点选 skill 后应注入 system 消息", hasSystemInjection);
+
+        boolean hasToolResult = false;
+        for (Message m : childRound2Messages) {
+            if ("tool".equals(m.role()) && m.content().contains("review-checklist 已加载")) {
+                hasToolResult = true;
+            }
+        }
+        assertTrue("子 agent Skill tool result 应保留", hasToolResult);
+
+        boolean hasProgress = false;
+        boolean hasSkillActivated = false;
+        boolean hasChildRound = false;
+        boolean hasChildText = false;
+        boolean hasChildToolStart = false;
+        boolean hasChildToolEnd = false;
+        boolean hasChildComplete = false;
+        String subAgentId = null;
+        for (AgentEvent event : events) {
+            if (!(event instanceof AgentEvent.SubAgentProgress)) {
+                continue;
+            }
+            AgentEvent.SubAgentProgress progress = (AgentEvent.SubAgentProgress) event;
+            if (!"reviewer".equals(progress.name())) {
+                continue;
+            }
+            hasProgress = true;
+            assertEquals("c1", progress.parentToolCallId());
+            assertEquals("审查这段代码", progress.task());
+            assertFalse(progress.background());
+            if (subAgentId == null) {
+                subAgentId = progress.subAgentId();
+            } else {
+                assertEquals("同一子代理调用的 progress ID 应稳定", subAgentId, progress.subAgentId());
+            }
+            AgentEvent childEvent = progress.event();
+            if (childEvent instanceof AgentEvent.SkillActivated) {
+                AgentEvent.SkillActivated activated = (AgentEvent.SkillActivated) childEvent;
+                assertEquals("review-checklist", activated.skillName());
+                hasSkillActivated = true;
+            } else if (childEvent instanceof AgentEvent.RoundStart) {
+                hasChildRound = true;
+            } else if (childEvent instanceof AgentEvent.TextDelta) {
+                hasChildText = true;
+            } else if (childEvent instanceof AgentEvent.ToolStart) {
+                AgentEvent.ToolStart toolStart = (AgentEvent.ToolStart) childEvent;
+                if ("check".equals(toolStart.toolName())) {
+                    hasChildToolStart = true;
+                }
+            } else if (childEvent instanceof AgentEvent.ToolEnd) {
+                AgentEvent.ToolEnd toolEnd = (AgentEvent.ToolEnd) childEvent;
+                if ("check".equals(toolEnd.toolName())) {
+                    hasChildToolEnd = true;
+                }
+            } else if (childEvent instanceof AgentEvent.Complete) {
+                hasChildComplete = true;
+            }
+        }
+        assertTrue("父级应收到子代理 progress", hasProgress);
+        assertTrue("父级应收到包装后的 SkillActivated", hasSkillActivated);
+        assertTrue("父级应收到子代理 RoundStart", hasChildRound);
+        assertTrue("父级应收到子代理 TextDelta", hasChildText);
+        assertTrue("父级应收到子代理 ToolStart", hasChildToolStart);
+        assertTrue("父级应收到子代理 ToolEnd", hasChildToolEnd);
+        assertTrue("父级应收到子代理 Complete", hasChildComplete);
+        assertTrue("子代理 progress 应有调用 ID", subAgentId != null && !subAgentId.isEmpty());
     }
 
     /**
@@ -137,6 +209,109 @@ public class SubAgentSkillTest {
         }
         assertTrue("子代理应继承父 Agent 的 USER 注入模式", hasUserInjection);
         assertFalse("子代理 USER 模式不应追加 Skill system 消息", hasSystemInjection);
+    }
+
+    /** 子代理 progress 消费者异常不应改变子代理和父 Agent 的业务结果。 */
+    @Test
+    public void subAgentProgress_consumerFailureDoesNotFailExecution() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("worker", "执行任务")
+                .systemPrompt("你是执行代理。")
+                .build();
+
+        MockLLM llm = new MockLLM(Arrays.asList(
+                toolCall("c1", "worker", "{\"task\":\"执行\"}"),
+                reply("子代理结果"),
+                reply("父代理结果")
+        ));
+        Agent agent = Agent.builder(llm, registry).build();
+
+        ChatResult result = agent.run("开始", event -> {
+            if (event instanceof AgentEvent.SubAgentProgress) {
+                throw new IllegalStateException("观察者故障");
+            }
+        });
+
+        assertEquals("父代理结果", result.content());
+    }
+
+    /** 同名子代理重复调用时，每次调用都有独立且稳定的 progress ID。 */
+    @Test
+    public void repeatedSubAgentCalls_haveDistinctProgressIds() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.registerSubAgent("worker", "执行任务")
+                .systemPrompt("你是执行代理。")
+                .build();
+
+        MockLLM llm = new MockLLM(Arrays.asList(
+                toolCall("c1", "worker", "{\"task\":\"第一次\"}"),
+                reply("子代理一"),
+                toolCall("c2", "worker", "{\"task\":\"第二次\"}"),
+                reply("子代理二"),
+                reply("父代理完成")
+        ));
+        Agent agent = Agent.builder(llm, registry).build();
+        List<AgentEvent> events = new CopyOnWriteArrayList<>();
+
+        assertEquals("父代理完成", agent.run("开始", events::add).content());
+
+        String firstId = null;
+        String secondId = null;
+        for (AgentEvent event : events) {
+            if (!(event instanceof AgentEvent.SubAgentProgress)) {
+                continue;
+            }
+            AgentEvent.SubAgentProgress progress = (AgentEvent.SubAgentProgress) event;
+            if ("第一次".equals(progress.task())) {
+                firstId = progress.subAgentId();
+            } else if ("第二次".equals(progress.task())) {
+                secondId = progress.subAgentId();
+            }
+        }
+        assertTrue("第一次调用应有 progress", firstId != null);
+        assertTrue("第二次调用应有 progress", secondId != null);
+        assertFalse("同名子代理重复调用应使用不同 ID", firstId.equals(secondId));
+    }
+
+    /** 后台 progress 使用 SubAgentRecord ID，并保留父 tool-call ID 与 background 标记。 */
+    @Test
+    public void backgroundSubAgentProgress_linksSpawnAndExecution() {
+        ToolRegistry registry = new ToolRegistry();
+        registry.register("tick", "推进父循环").handle(args -> "tick");
+        registry.registerSubAgent("worker", "执行后台任务")
+                .systemPrompt("你是后台执行代理。")
+                .llm(new DelayedMockLLM(1000, List.of(reply("后台结果"))))
+                .build();
+
+        MockLLM parentLlm = new MockLLM(Arrays.asList(
+                toolCall("c1", "worker", "{\"task\":\"后台审查\",\"run_in_background\":true}"),
+                toolCall("p2", "tick", "{}"),
+                reply("后台结果处理中"),
+                reply("父代理完成")
+        ));
+        Agent agent = Agent.builder(parentLlm, registry).build();
+        List<AgentEvent> events = new CopyOnWriteArrayList<>();
+
+        assertEquals("父代理完成", agent.run("开始", events::add).content());
+
+        String spawnedId = null;
+        AgentEvent.SubAgentProgress progress = null;
+        for (AgentEvent event : events) {
+            if (event instanceof AgentEvent.SubAgentSpawned) {
+                spawnedId = ((AgentEvent.SubAgentSpawned) event).subAgentId();
+            } else if (event instanceof AgentEvent.SubAgentProgress) {
+                AgentEvent.SubAgentProgress candidate = (AgentEvent.SubAgentProgress) event;
+                if ("worker".equals(candidate.name())) {
+                    progress = candidate;
+                }
+            }
+        }
+        assertTrue("后台应发出 Spawned", spawnedId != null);
+        assertTrue("后台应发出 progress", progress != null);
+        assertEquals("Spawned 与 progress 应使用同一 ID", spawnedId, progress.subAgentId());
+        assertEquals("c1", progress.parentToolCallId());
+        assertEquals("后台审查", progress.task());
+        assertTrue(progress.background());
     }
 
     /**
@@ -285,6 +460,26 @@ public class SubAgentSkillTest {
 
         List<List<Tool>> getCapturedTools() {
             return capturedTools;
+        }
+    }
+
+    static class DelayedMockLLM extends MockLLM {
+        private final long delayMs;
+
+        DelayedMockLLM(long delayMs, List<ChatResult> responses) {
+            super(responses);
+            this.delayMs = delayMs;
+        }
+
+        @Override
+        public ChatResult streamChat(List<Message> messages, List<Tool> tools,
+                                    OutputFormat outputFormat, Consumer<ChatChunk> callback) {
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return super.streamChat(messages, tools, outputFormat, callback);
         }
     }
 }

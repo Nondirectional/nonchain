@@ -64,6 +64,7 @@ public class BackgroundSubAgentManager implements AutoCloseable {
     /**
      * spawn 一个后台子代理(D4 含熔断 + 队列)。立即返回 tool result,不阻塞。
      *
+     * @param parentToolCallId 触发本次委派的父 tool-call id
      * @param def            子代理定义
      * @param task           委派任务
      * @param assistantMsg   触发本次委派的父 assistant 消息
@@ -71,7 +72,13 @@ public class BackgroundSubAgentManager implements AutoCloseable {
      * @param parentRunId    父 run() 标识(用于 conversationId)
      * @return 给父 LLM 的即时 tool result
      */
+    /** 向后兼容入口：未关联父 tool-call。 */
     public synchronized String spawn(SubAgentDefinition def, String task, Message assistantMsg,
+                                     List<Message> parentSnapshot, String parentRunId) {
+        return spawn(null, def, task, assistantMsg, parentSnapshot, parentRunId);
+    }
+
+    public synchronized String spawn(String parentToolCallId, SubAgentDefinition def, String task, Message assistantMsg,
                                      List<Message> parentSnapshot, String parentRunId) {
         if (closed) {
             return "后台管理器已关闭,拒绝新任务";
@@ -83,7 +90,7 @@ public class BackgroundSubAgentManager implements AutoCloseable {
         totalSpawned++;
 
         CompletableFuture<SubAgentResult> future = new CompletableFuture<>();
-        SubAgentRecord record = new SubAgentRecord(def.name(), task, future);
+        SubAgentRecord record = new SubAgentRecord(def.name(), task, parentToolCallId, future);
         allRecords.put(record.id(), record);
         emit(new AgentEvent.SubAgentSpawned(record.id(), def.name(), task, true));
 
@@ -104,7 +111,7 @@ public class BackgroundSubAgentManager implements AutoCloseable {
         bgExecutor.submit(() -> {
             try {
                 SubAgentResult sr = parentAgent.executeBackgroundSubAgent(
-                        record, def, task, assistantMsg, parentSnapshot, parentRunId);
+                        record, def, task, assistantMsg, parentSnapshot, parentRunId, this::emit);
                 record.markCompleted(sr);
                 onTaskDone(record);
                 emit(new AgentEvent.SubAgentCompleted(record.id(), def.name(),
@@ -119,10 +126,11 @@ public class BackgroundSubAgentManager implements AutoCloseable {
 
     /** 任务完成回调:从 running 移除,加入 completedUnconsumed,drain 队列 */
     private void onTaskDone(SubAgentRecord record) {
-        running.remove(record.id());
         if (!record.resultConsumed()) {
             completedUnconsumed.add(record);
         }
+        // 先登记 completed，再移除 running，避免父循环在两步之间观察到“无运行且无完成”。
+        running.remove(record.id());
         drainPending();
     }
 

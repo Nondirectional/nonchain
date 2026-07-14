@@ -227,7 +227,7 @@ private Map<String, Object> parseArguments(String json) {
 
 **Result consumption contracts（D3 自动 join + 主动拉取）**:
 - **轮末自动 join**：每轮 tool 执行后、下一轮 LLM 推理前，`bgManager.joinCompleted()` 把已完成未消费结果**合并成一条 user 消息**注入（D13，降低膨胀）。
-- **Complete 前强制等待**：`!result.hasToolCalls()` 分支调 `bgManager.awaitAll(timeout)`；有未消费则注入 + `continue`（让 LLM 再看一轮），无则真正 Complete。
+- **Complete 前强制等待**：`!result.hasToolCalls()` 分支有运行任务时调 `bgManager.awaitAll(timeout)`；无运行任务时仍执行 `joinCompleted()`，避免任务在状态检查竞态窗口完成后丢失结果；有未消费则注入 + `continue`（让 LLM 再看一轮），无则真正 Complete。
 - **`get_subagent_result` 工具**：父 LLM 主动查询/等待（`wait:true` 阻塞，但有 `awaitTimeoutMs` 超时保护——瑕疵E）。返回完整结果 + 状态。
 
 **Steer contracts（D6 仅后台）**:

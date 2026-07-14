@@ -18,6 +18,9 @@ import com.non.chain.ChatResult;
  *     }
  * });
  * }</pre>
+ *
+ * <p>子代理内部事件通过 {@link SubAgentProgress} 包装转发，调用方可用
+ * {@code progress.event()} 继续按原始事件类型处理。</p>
  */
 public interface AgentEvent {
 
@@ -285,6 +288,39 @@ public interface AgentEvent {
 
         public String subAgentId() { return subAgentId; }
         public String name() { return name; }
+    }
+
+    /**
+     * 子代理内部执行事件包装。父级事件消费者可据此区分不同子代理调用，
+     * 同时通过 {@link #event()} 保留原始事件类型和载荷。
+     *
+     * <p>同一 {@code subAgentId} 内事件按产生顺序投递；多个后台子代理之间允许并发交错，
+     * 因此消费者需要自行保证线程安全。消费者异常由子代理传播层隔离，不影响业务执行。</p>
+     */
+    class SubAgentProgress implements AgentEvent {
+        private final String subAgentId;
+        private final String name;
+        private final String task;
+        private final String parentToolCallId;
+        private final boolean background;
+        private final AgentEvent event;
+
+        public SubAgentProgress(String subAgentId, String name, String task,
+                                String parentToolCallId, boolean background, AgentEvent event) {
+            this.subAgentId = subAgentId;
+            this.name = name;
+            this.task = task;
+            this.parentToolCallId = parentToolCallId;
+            this.background = background;
+            this.event = event;
+        }
+
+        public String subAgentId() { return subAgentId; }
+        public String name() { return name; }
+        public String task() { return task; }
+        public String parentToolCallId() { return parentToolCallId; }
+        public boolean background() { return background; }
+        public AgentEvent event() { return event; }
     }
 
     /**

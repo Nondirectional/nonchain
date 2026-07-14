@@ -37,6 +37,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -353,12 +354,12 @@ public class Agent {
 
                     if (!result.hasToolCalls()) {
                         // 准备 Complete:D3 强制等待所有后台完成或超时
-                        if (bgManager.hasRunning()) {
-                            JoinResult jr = bgManager.awaitAll(awaitTimeoutMs);
-                            if (jr.hasUnconsumed()) {
-                                messages.add(jr.mergedMessage());  // 注入后台结果,让 LLM 再看一轮
-                                continue;
-                            }
+                        JoinResult jr = bgManager.hasRunning()
+                                ? bgManager.awaitAll(awaitTimeoutMs)
+                                : bgManager.joinCompleted();
+                        if (jr.hasUnconsumed()) {
+                            messages.add(jr.mergedMessage());  // 注入后台结果,让 LLM 再看一轮
+                            continue;
                         }
                         // 真正 Complete:无遗留后台
                         if (eventConsumer != null) {
@@ -400,7 +401,8 @@ public class Agent {
                                 }
                                 final ToolCall finalTc = tc;
                                 futures[i] = CompletableFuture.supplyAsync(
-                                        () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot, traceId, runId, bgManager),
+                                        () -> executeWithToolSpan(finalTc, llmCtx, assistantMessage, parentSnapshot,
+                                                traceId, runId, bgManager, eventConsumer),
                                         executor)
                                         .whenComplete((output, err) -> {
                                             if (eventConsumer != null) {
@@ -431,7 +433,8 @@ public class Agent {
                             if (eventConsumer != null) {
                                 eventConsumer.accept(new AgentEvent.ToolStart(tc.name(), tc.arguments()));
                             }
-                            String output = executeWithToolSpan(tc, null, assistantMessage, parentSnapshot, traceId, runId, bgManager);
+                            String output = executeWithToolSpan(tc, null, assistantMessage, parentSnapshot,
+                                    traceId, runId, bgManager, eventConsumer);
                             if (eventConsumer != null) {
                                 eventConsumer.accept(new AgentEvent.ToolEnd(tc.name(), output));
                             }
@@ -497,9 +500,10 @@ public class Agent {
      */
     private String executeWithToolSpan(ToolCall tc, SpanContext parentCtx,
                                        Message assistantMessage, List<Message> parentMessages, String traceId,
-                                       String runId, BackgroundSubAgentManager bgManager) {
+                                       String runId, BackgroundSubAgentManager bgManager,
+                                       java.util.function.Consumer<AgentEvent> eventConsumer) {
         if (tracer == null) {
-            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
+            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager, eventConsumer);
         }
         Tracer.ScopedSpan toolSpan = parentCtx != null
                 ? tracer.startChild(parentCtx, SpanAttributes.SpanType.TOOL, tc.name())
@@ -508,7 +512,7 @@ public class Agent {
         // 错误状态由 RecordingCallback.onToolError 标记到 span；这里只兜底真正向上传播的异常
         // （如拦截器抛出的 AgentException）。
         try {
-            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
+            return safeExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager, eventConsumer);
         } catch (RuntimeException e) {
             toolSpan.markError(e);
             throw e;
@@ -528,7 +532,8 @@ public class Agent {
      * 普通工具路径不读取它，行为与改动前一致。</p>
      */
     private String safeExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages,
-                               String traceId, String runId, BackgroundSubAgentManager bgManager) {
+                               String traceId, String runId, BackgroundSubAgentManager bgManager,
+                               java.util.function.Consumer<AgentEvent> eventConsumer) {
         ToolCallContext ctx = new ToolCallContext(tc.id(), tc.name(), tc.arguments(), assistantMessage);
 
         // 1. callback: onToolStart（唯一触发点）
@@ -552,7 +557,7 @@ public class Agent {
             String result;
             boolean isError = false;
             try {
-                result = dispatchExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager);
+                result = dispatchExecute(tc, assistantMessage, parentMessages, traceId, runId, bgManager, eventConsumer);
             } catch (Exception execEx) {
                 // 工具/子代理执行错误：软失败（现状语义），仍允许 after 拦截器处理错误结果
                 result = "工具执行失败: " + execEx.getMessage();
@@ -640,16 +645,18 @@ public class Agent {
      * </ol>
      */
     private String dispatchExecute(ToolCall tc, Message assistantMessage, List<Message> parentMessages,
-                                   String traceId, String runId, BackgroundSubAgentManager bgManager) {
+                                   String traceId, String runId, BackgroundSubAgentManager bgManager,
+                                   java.util.function.Consumer<AgentEvent> eventConsumer) {
         // 1. 独立子代理 tool：tool 名即子代理名
         if (toolRegistry.hasSubAgent(tc.name())) {
             SubAgentDefinition def = toolRegistry.getSubAgent(tc.name());
             String task = parseTaskArg(tc.arguments(), def.name());
             boolean background = parseBackgroundArg(tc.arguments());
             if (background) {
-                return bgManager.spawn(def, task, assistantMessage, parentMessages, runId);
+                return bgManager.spawn(tc.id(), def, task, assistantMessage, parentMessages, runId);
             }
-            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId, runId, false);
+            return executeSubAgentTool(tc.id(), def, task, assistantMessage, parentMessages,
+                    traceId, runId, false, eventConsumer);
         }
         // 2. 通用 delegate tool：先解析 agentName 再定位子代理
         if (ToolRegistry.DELEGATE_TOOL_NAME.equals(tc.name())) {
@@ -658,9 +665,10 @@ public class Agent {
             String task = parseTaskArg(tc.arguments(), agentName);
             boolean background = parseBackgroundArg(tc.arguments());
             if (background) {
-                return bgManager.spawn(def, task, assistantMessage, parentMessages, runId);
+                return bgManager.spawn(tc.id(), def, task, assistantMessage, parentMessages, runId);
             }
-            return executeSubAgentTool(def, task, assistantMessage, parentMessages, traceId, runId, false);
+            return executeSubAgentTool(tc.id(), def, task, assistantMessage, parentMessages,
+                    traceId, runId, false, eventConsumer);
         }
         // 3. get_subagent_result tool(D3)
         if (ToolRegistry.GET_RESULT_TOOL_NAME.equals(tc.name())) {
@@ -686,14 +694,16 @@ public class Agent {
      * <p>D12 后台/前台 context 截断:前台全量,后台截断(此处 background=false 用全量)。</p>
      * <p>D6 steer:前台不启用 enableSteer(无触发源)。</p>
      *
-     * @param background 是否后台模式(影响 context 截断 + conversationId + steer 启用)
-     * @param recordId   后台子代理的 recordId(后台 conversationId 隔离用,瑕疵C);前台传 null
+     * @param parentToolCallId 触发本次委派的父 tool-call id
+     * @param eventConsumer    父级 AgentEvent 消费者，可为空
      */
-    private String executeSubAgentTool(SubAgentDefinition def, String task,
+    private String executeSubAgentTool(String parentToolCallId, SubAgentDefinition def, String task,
                                        Message assistantMessage, List<Message> parentMessages,
-                                       String traceId, String runId, boolean background) {
+                                       String traceId, String runId, boolean background,
+                                       java.util.function.Consumer<AgentEvent> eventConsumer) {
+        String subAgentId = UUID.randomUUID().toString();
         SubAgentResult sr = runSubAgentInternal(def, task, assistantMessage, parentMessages,
-                runId, background, null);
+                runId, background, null, subAgentId, parentToolCallId, eventConsumer);
         return sr.displayText();
     }
 
@@ -701,11 +711,29 @@ public class Agent {
      * 后台子代理执行入口(供 BackgroundSubAgentManager 调用,D6 启用 steer)。
      *
      * @param record 后台子代理记录(含 steer 队列 + recordId)
+     * @param eventConsumer 父级事件安全出口
      */
     SubAgentResult executeBackgroundSubAgent(SubAgentRecord record, SubAgentDefinition def, String task,
                                              Message assistantMessage, List<Message> parentMessages,
-                                             String runId) {
-        return runSubAgentInternal(def, task, assistantMessage, parentMessages, runId, true, record);
+                                             String runId,
+                                             java.util.function.Consumer<AgentEvent> eventConsumer) {
+        return runSubAgentInternal(def, task, assistantMessage, parentMessages, runId, true, record,
+                record.id(), record.parentToolCallId(), eventConsumer);
+    }
+
+    /**
+     * 将子代理内部事件包装后投递给父级。观察者异常不可改变子代理业务执行结果。
+     */
+    private static void emitSubAgentProgress(java.util.function.Consumer<AgentEvent> eventConsumer,
+                                             String subAgentId, String name, String task,
+                                             String parentToolCallId, boolean background,
+                                             AgentEvent childEvent) {
+        try {
+            eventConsumer.accept(new AgentEvent.SubAgentProgress(
+                    subAgentId, name, task, parentToolCallId, background, childEvent));
+        } catch (Exception ignored) {
+            // 事件观察失败不影响子代理执行。
+        }
     }
 
     /**
@@ -713,7 +741,9 @@ public class Agent {
      */
     private SubAgentResult runSubAgentInternal(SubAgentDefinition def, String task,
                                                Message assistantMessage, List<Message> parentMessages,
-                                               String runId, boolean background, SubAgentRecord record) {
+                                               String runId, boolean background, SubAgentRecord record,
+                                               String subAgentId, String parentToolCallId,
+                                               java.util.function.Consumer<AgentEvent> eventConsumer) {
         // D7 resume + 瑕疵C conversationId
         com.non.chain.memory.ChatMemoryStore store = def.chatMemoryStore();
         String conversationId = background
@@ -790,8 +820,14 @@ public class Agent {
             // 运行中后续的 steer 通过 bgManager.steer → child.steer 直接桥接(见 record.childAgent)
         }
 
-        // 3. 运行子代理
-        ChatResult childResult = child.run(childMessages);
+        // 3. 运行子代理。父级订阅事件时，子 Agent 走既有 streaming overload，
+        // 并将每个内部事件包装为带调用上下文的 SubAgentProgress。
+        java.util.function.Consumer<AgentEvent> childEventConsumer = eventConsumer == null ? null
+                : childEvent -> emitSubAgentProgress(eventConsumer, subAgentId, def.name(), task,
+                        parentToolCallId, background, childEvent);
+        ChatResult childResult = childEventConsumer != null
+                ? child.run(childMessages, childEventConsumer)
+                : child.run(childMessages);
         String content = childResult.content() != null ? childResult.content() : "";
 
         // 4. D7 resume:存回历史(去掉 systemPrompt)

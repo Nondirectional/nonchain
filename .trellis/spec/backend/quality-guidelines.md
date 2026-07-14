@@ -250,3 +250,91 @@ Agent.builder(llm, tools)
     .skillInjectionMode(SkillInjectionMode.USER)
     .build();
 ```
+
+---
+
+## SubAgent Progress Event Contract
+
+### 1. Scope / Trigger
+
+This contract applies when a parent Agent exposes a streaming `eventConsumer` and delegates
+foreground or background work to a SubAgent.
+
+### 2. Signatures
+
+```java
+interface AgentEvent {
+    final class SubAgentProgress implements AgentEvent {
+        String subAgentId();
+        String name();
+        String task();
+        String parentToolCallId();
+        boolean background();
+        AgentEvent event();
+    }
+}
+```
+
+### 3. Contracts
+
+- A parent event consumer automatically receives one `SubAgentProgress` per child
+  `AgentEvent`; no additional Builder opt-in exists.
+- `event()` preserves the original child event type and payload (`RoundStart`, deltas,
+  tool events, `SkillActivated`, `Complete`, or `AgentError`).
+- `subAgentId` is a UUID for foreground calls and the existing `SubAgentRecord.id` for
+  background calls; it is stable for that invocation.
+- `parentToolCallId` is the triggering `ToolCall.id()` and may be null.
+- Events are ordered per invocation, may interleave across background invocations, and the
+  consumer must be thread-safe.
+- Consumer exceptions are isolated for progress events and cannot change child business
+  results. Existing parent event behavior remains unchanged.
+- No parent lifecycle events are added for foreground calls; existing background lifecycle
+  events remain unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| No parent event consumer | Child runs through non-streaming overload; no progress wrappers |
+| Parent consumer + foreground child | Progress wrappers with `background=false` |
+| Parent consumer + background child | Progress wrappers with record ID and `background=true` |
+| Same child name called twice | Different progress IDs |
+| Consumer throws on progress | Child result and parent tool result remain unchanged |
+| Child emits an error | Wrapped `AgentError`; existing outer error path remains |
+
+### 5. Good / Base / Bad Cases
+
+- Good: route `SubAgentProgress.event()` by `instanceof` and group UI state by `subAgentId`.
+- Base: ignore unknown event types while preserving existing parent event handling.
+- Bad: cast every incoming event directly to `TextDelta`; progress wrappers intentionally add
+  one level of envelope.
+
+### 6. Tests Required
+
+- Foreground Mock LLM test asserts Skill schema, Skill tool call, tool result, injected message,
+  wrapped `SkillActivated`, context fields, and original Round/Text/Complete events.
+- Repeated-call test asserts distinct IDs for same-name invocations.
+- Background test asserts progress ID equals `SubAgentSpawned.subAgentId`, parent tool-call ID,
+  task, and background flag.
+- Consumer-failure test asserts final parent result remains successful.
+- Full `chain` and `chain-example` Maven tests pass.
+
+### 7. Wrong vs Correct
+
+Wrong:
+
+```java
+event -> ((AgentEvent.SkillActivated) event).skillName();
+```
+
+Correct:
+
+```java
+event -> {
+    if (event instanceof AgentEvent.SubAgentProgress) {
+        AgentEvent.SubAgentProgress progress = (AgentEvent.SubAgentProgress) event;
+        AgentEvent childEvent = progress.event();
+        // Group by progress.subAgentId(), then inspect childEvent with instanceof.
+    }
+}
+```

@@ -41,7 +41,7 @@ src/main/java/com/non/chain/
 │   └── ToolRegistry.java     # Central registry: annotation scan + fluent API + SubAgent registration
 ├── agent/
 │   ├── Agent.java            # LLM + tool loop executor (Builder pattern, memory/callback/streaming/interceptors/graceful/steer/bgSubAgent/skill)
-│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/... + SubAgent lifecycle + SkillActivated events)
+│   ├── AgentEvent.java       # Streaming event interface (TextDelta/ThinkingDelta/ToolStart/ToolEnd/... + SubAgentProgress/lifecycle + SkillActivated events)
 │   ├── AgentException.java   # Unchecked exception for agent loop failures
 │   ├── BeforeToolCall.java   # Interceptor: before tool execution (can block)
 │   ├── AfterToolCall.java    # Interceptor: after tool execution (can rewrite result)
@@ -54,7 +54,7 @@ src/main/java/com/non/chain/
 │   ├── ContextSelector.java       # Functional interface: parent-context pruning strategy for sub-agents
 │   ├── SubAgentStatus.java        # Enum: RUNNING/COMPLETED/STEERED/ABORTED/FAILED (graceful max turns)
 │   ├── SubAgentResult.java        # Sub-agent run result: content + status + displayText() (status note)
-│   ├── SubAgentRecord.java        # Background sub-agent runtime state: future/status/result/steers/childAgent
+│   ├── SubAgentRecord.java        # Background sub-agent runtime state: id/parent tool-call/future/status/result/steers/childAgent
 │   ├── BackgroundSubAgentManager.java  # Background orchestration: thread pool/queue/circuit-breaker/join/awaitAll (scoped to one run())
 │   └── JoinResult.java            # Round-end join product: mergedMessage() from completed background results
 ├── skill/                        # Skill system: procedural knowledge injection (LLM-selectable, system-message injection)
@@ -108,6 +108,7 @@ Delegated sub-agents are registered in `ToolRegistry`, exposed by `Agent.Builder
 5. Only runs inside the `Agent` auto-loop; hand-written `registry.execute("subAgent", ...)` fails fast
 6. Background/background-parallel: parent LLM passes `run_in_background=true` (D11 call-level); background orchestration via `BackgroundSubAgentManager` (scoped to one `run()`, independent thread pool, max-running + circuit-breaker). `get_subagent_result` / `steer_subagent` tools auto-exposed when sub-agents exist.
 7. Parent `Agent` graceful: `.graceTurns(n)` (default 3; **0 = fallback to 0.9.x hard-cutoff throwing `AgentException`**). `.graceTurns(0)` is the only path that throws on maxIterations exceeded.
+8. When a parent `eventConsumer` is present, child Agent events are forwarded as `AgentEvent.SubAgentProgress` with invocation ID, name, task, parent tool-call ID, background flag, and original event payload. `ChainCallback` remains isolated; background lifecycle events remain additive.
 
 ### Registering a skill (procedural knowledge injection)
 Skills are **processual knowledge text** (not executable tools) — they tell the Agent *how* to do something. The LLM self-selects a skill via tool-calling; on selection, the skill's content is injected according to the Agent's `SkillInjectionMode` (default `SYSTEM`, explicit `USER` override). Skills live in an independent `SkillRegistry` (parallel to `ToolRegistry`):

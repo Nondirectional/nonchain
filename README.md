@@ -232,7 +232,7 @@ Agent agent = Agent.builder(llm, registry)
 - 子代理默认**无状态**：独立 `systemPrompt`、独立工具集、独立 `before/after` 拦截器、独立 `maxIterations`，默认**继承父 LLM**
 - **Skill 预加载（D13）**：子代理可通过 `.skillRegistry(skills)` 挂载 skill，委派执行时子 agent 可像顶层 Agent 一样按需点选 skill（继承父 Agent 的注入模式）；子代理范围内的 skill 名 vs tool 名冲突自动校验
 - **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**不含父 `systemPrompt`**）；可在注册时用 `contextSelector(...)` 覆盖默认裁剪策略
-- **callback / trace 隔离**：父侧把子代理视为一次普通工具调用（`onToolStart`/`onToolComplete`/`onToolError`），子代理内部事件不透出到父；新增 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 等生命周期事件供应用层观测
+- **callback / event / trace 边界**：父侧 `ChainCallback` 仍把子代理视为一次普通工具调用；传入 `eventConsumer` 时，子代理内部事件通过 `AgentEvent.SubAgentProgress` 包装转发（含调用 ID、名称、任务、父 tool-call ID、原始事件），后台生命周期事件继续由 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 提供；Trace 记录完整嵌套 span 树
 - **错误语义**：子代理整体失败 → 外层记 `ToolErrorEvent` 并把错误文本回灌父 Agent，父循环继续
 - **graceful max turns（⚠️ 0.10.0 破坏性变更）**：超 `maxIterations` 不再抛异常，改为注入「收尾」提示给 `graceTurns`（默认 3）轮收尾，超时返回部分结果（标 `ABORTED`/`STEERED`）。`.graceTurns(0)` 回退 0.9.x 硬截断（抛 `AgentException`）
 - **仅一层**：子代理 `toolRegistry` 若注册了 subAgent → `build()` fail-fast；**仅支持 `Agent` 自动循环**，手写 `registry.execute("子代理名", ...)` 会 fail-fast

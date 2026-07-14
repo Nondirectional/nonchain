@@ -26,6 +26,7 @@ public final class SubAgentRecord {
     private final String id;                    // UUID,conversationId 后台隔离用(瑕疵C)
     private final String name;                  // 子代理名
     private final String task;                  // 本次委派任务
+    private final String parentToolCallId;      // 触发本次委派的父 tool-call id
     private final Instant spawnedAt;
 
     private final CompletableFuture<SubAgentResult> future;
@@ -36,10 +37,17 @@ public final class SubAgentRecord {
     private final BlockingQueue<String> pendingSteers = new LinkedBlockingQueue<>();  // D6
     private volatile Agent childAgent;           // D6 steer 桥接:运行中的子代理实例
 
+    /** 向后兼容构造：未关联父 tool-call。 */
     public SubAgentRecord(String name, String task, CompletableFuture<SubAgentResult> future) {
+        this(name, task, null, future);
+    }
+
+    public SubAgentRecord(String name, String task, String parentToolCallId,
+                          CompletableFuture<SubAgentResult> future) {
         this.id = UUID.randomUUID().toString();
         this.name = name;
         this.task = task;
+        this.parentToolCallId = parentToolCallId;
         this.future = future;
         this.spawnedAt = Instant.now();
     }
@@ -54,6 +62,10 @@ public final class SubAgentRecord {
 
     public String task() {
         return task;
+    }
+
+    public String parentToolCallId() {
+        return parentToolCallId;
     }
 
     public Instant spawnedAt() {
@@ -99,6 +111,7 @@ public final class SubAgentRecord {
         this.status = sr.status();
         this.result = sr.content() != null ? sr.content() : "";
         this.completedAt = Instant.now();
+        this.future.complete(sr);
     }
 
     /** 标记失败 */
@@ -106,6 +119,7 @@ public final class SubAgentRecord {
         this.status = SubAgentStatus.FAILED;
         this.result = "后台子代理执行失败: " + (error != null ? error.getMessage() : "未知错误");
         this.completedAt = Instant.now();
+        this.future.completeExceptionally(error != null ? error : new RuntimeException(this.result));
     }
 
     /** 标记结果已被消费(join/get_subagent_result) */
