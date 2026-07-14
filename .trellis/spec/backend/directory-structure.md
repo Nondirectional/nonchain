@@ -49,7 +49,7 @@ src/main/java/com/non/chain/
 │   ├── AfterResult.java      # after interceptor return type (keep/rewrite)
 │   ├── ToolCallContext.java  # Immutable interceptor input context
 │   ├── SubAgentExposureMode.java  # Enum: DIRECT (default, one tool per sub-agent) / DELEGATE (single delegate tool)
-│   ├── SubAgentDefinition.java    # Immutable value object: sub-agent config (name/desc/systemPrompt/llm/tools/chatMemoryStore/...)
+│   ├── SubAgentDefinition.java    # Immutable value object: sub-agent config (name/desc/systemPrompt/llm/tools/chatMemoryStore/skillRegistry/...)
 │   ├── ContextSelector.java       # Functional interface: parent-context pruning strategy for sub-agents
 │   ├── SubAgentStatus.java        # Enum: RUNNING/COMPLETED/STEERED/ABORTED/FAILED (graceful max turns)
 │   ├── SubAgentResult.java        # Sub-agent run result: content + status + displayText() (status note)
@@ -101,7 +101,7 @@ Two supported approaches:
 ### Registering a delegated sub-agent (SubAgent)
 Delegated sub-agents are registered in `ToolRegistry`, exposed by `Agent.Builder`:
 1. Call `registry.registerSubAgent(name, description)` → declarative `SubAgentRegistration` Builder (`description` for LLM schema, `systemPrompt` for sub-agent role — both required, defined separately)
-2. Configure optional fields: `.toolRegistry(childTools)` (nullable = no-tool sub-agent; **D10: must not itself contain subAgents or `build()` throws**), `.llm(override)` (default = inherit parent LLM), `.maxIterations(n)`, `.contextSelector(strategy)`, `.chatMemoryStore(store)` (D7: null = stateless 0.9.x; non-null enables resume), `.addBeforeToolCall/.addAfterToolCall` (scoped to sub-agent internals)
+2. Configure optional fields: `.toolRegistry(childTools)` (nullable = no-tool sub-agent; **D10: must not itself contain subAgents or `build()` throws**), `.llm(override)` (default = inherit parent LLM), `.maxIterations(n)`, `.contextSelector(strategy)`, `.chatMemoryStore(store)` (D7: null = stateless 0.9.x; non-null enables resume), `.skillRegistry(skills)` (D13: null = no-skill sub-agent; non-null enables skill selection during delegation — same behavior as top-level Agent), `.addBeforeToolCall/.addAfterToolCall` (scoped to sub-agent internals)
 3. `.build()` writes the `SubAgentDefinition` into `ToolRegistry`
 4. Parent `Agent` picks exposure mode via `.subAgentExposureMode(DIRECT|DELEGATE)` (build-time fixed, default `DIRECT`)
 5. Only runs inside the `Agent` auto-loop; hand-written `registry.execute("subAgent", ...)` fails fast

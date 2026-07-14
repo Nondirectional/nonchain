@@ -230,6 +230,7 @@ Agent agent = Agent.builder(llm, registry)
 **默认行为与边界**：
 
 - 子代理默认**无状态**：独立 `systemPrompt`、独立工具集、独立 `before/after` 拦截器、独立 `maxIterations`，默认**继承父 LLM**
+- **Skill 预加载（D13）**：子代理可通过 `.skillRegistry(skills)` 挂载 skill，委派执行时子 agent 可像顶层 Agent 一样按需点选 skill（注入 system 消息）；子代理范围内的 skill 名 vs tool 名冲突自动校验
 - **上下文裁剪**：框架自动从父消息链裁剪上下文注入子代理（含相关 user/assistant/tool，**排除 `llmVisible=false` 应用层消息**，**不含父 `systemPrompt`**）；可在注册时用 `contextSelector(...)` 覆盖默认裁剪策略
 - **callback / trace 隔离**：父侧把子代理视为一次普通工具调用（`onToolStart`/`onToolComplete`/`onToolError`），子代理内部事件不透出到父；新增 `SubAgentSpawned/Started/Completed/Failed/Steered/Aborted` 等生命周期事件供应用层观测
 - **错误语义**：子代理整体失败 → 外层记 `ToolErrorEvent` 并把错误文本回灌父 Agent，父循环继续

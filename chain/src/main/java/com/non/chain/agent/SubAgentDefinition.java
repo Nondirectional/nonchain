@@ -2,6 +2,7 @@ package com.non.chain.agent;
 
 import com.non.chain.memory.ChatMemoryStore;
 import com.non.chain.provider.LLM;
+import com.non.chain.skill.SkillRegistry;
 import com.non.chain.tool.ToolRegistry;
 
 import java.util.Collections;
@@ -28,6 +29,7 @@ public final class SubAgentDefinition {
     private final List<BeforeToolCall> beforeInterceptors;
     private final List<AfterToolCall> afterInterceptors;
     private final ChatMemoryStore chatMemoryStore;    // nullable：为空 = 无状态(0.9.0 语义,D7)
+    private final SkillRegistry skillRegistry;        // nullable：为空表示无 skill 子代理(D13)
 
     public SubAgentDefinition(String name, String description, String systemPrompt,
                               ToolRegistry toolRegistry, LLM llmOverride, Integer maxIterations,
@@ -44,6 +46,17 @@ public final class SubAgentDefinition {
                               List<BeforeToolCall> beforeInterceptors,
                               List<AfterToolCall> afterInterceptors,
                               ChatMemoryStore chatMemoryStore) {
+        this(name, description, systemPrompt, toolRegistry, llmOverride, maxIterations,
+                contextSelector, beforeInterceptors, afterInterceptors, chatMemoryStore, null);
+    }
+
+    public SubAgentDefinition(String name, String description, String systemPrompt,
+                              ToolRegistry toolRegistry, LLM llmOverride, Integer maxIterations,
+                              ContextSelector contextSelector,
+                              List<BeforeToolCall> beforeInterceptors,
+                              List<AfterToolCall> afterInterceptors,
+                              ChatMemoryStore chatMemoryStore,
+                              SkillRegistry skillRegistry) {
         this.name = name;
         this.description = description;
         this.systemPrompt = systemPrompt;
@@ -56,6 +69,7 @@ public final class SubAgentDefinition {
         this.afterInterceptors = afterInterceptors == null
                 ? Collections.emptyList() : Collections.unmodifiableList(afterInterceptors);
         this.chatMemoryStore = chatMemoryStore;
+        this.skillRegistry = skillRegistry;
     }
 
     public String name() {
@@ -102,6 +116,16 @@ public final class SubAgentDefinition {
      */
     public ChatMemoryStore chatMemoryStore() {
         return chatMemoryStore;
+    }
+
+    /**
+     * Skill 注册中心(D13 子代理 skill 预加载)。null = 无 skill 子代理;
+     * 非 null 时子代理可按需点选 skill,与顶层 Agent 行为一致。
+     *
+     * @return SkillRegistry,可能为 null
+     */
+    public SkillRegistry skillRegistry() {
+        return skillRegistry;
     }
 }
 

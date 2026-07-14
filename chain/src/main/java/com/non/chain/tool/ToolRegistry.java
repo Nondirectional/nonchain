@@ -475,6 +475,7 @@ public class ToolRegistry {
         private Integer maxIterations;
         private com.non.chain.agent.ContextSelector contextSelector;
         private com.non.chain.memory.ChatMemoryStore chatMemoryStore;
+        private com.non.chain.skill.SkillRegistry skillRegistry;
         private final List<com.non.chain.agent.BeforeToolCall> beforeInterceptors = new ArrayList<>();
         private final List<com.non.chain.agent.AfterToolCall> afterInterceptors = new ArrayList<>();
 
@@ -522,6 +523,15 @@ public class ToolRegistry {
             return this;
         }
 
+        /**
+         * Skill 注册中心(D13 子代理 skill 预加载)。默认 null = 无 skill 子代理;
+         * 配置后子代理在委派运行时可按需点选 skill,与顶层 Agent 行为一致。
+         */
+        public SubAgentRegistration skillRegistry(com.non.chain.skill.SkillRegistry skillRegistry) {
+            this.skillRegistry = skillRegistry;
+            return this;
+        }
+
         public SubAgentRegistration addBeforeToolCall(com.non.chain.agent.BeforeToolCall interceptor) {
             if (interceptor != null) {
                 this.beforeInterceptors.add(interceptor);
@@ -553,7 +563,8 @@ public class ToolRegistry {
             }
             SubAgentDefinition def = new SubAgentDefinition(
                     name, description, systemPrompt, toolRegistry, llmOverride, maxIterations,
-                    contextSelector, beforeInterceptors, afterInterceptors, chatMemoryStore);
+                    contextSelector, beforeInterceptors, afterInterceptors, chatMemoryStore,
+                    skillRegistry);
             registry.subAgents.put(name, def);
             return registry;
         }

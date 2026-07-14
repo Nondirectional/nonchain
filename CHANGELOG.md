@@ -9,6 +9,7 @@
 ### 新增
 
 - **Skill（过程性知识注入）**：引入 `com.non.chain.skill` 包（`SkillDefinition` + `SkillRegistry`），Agent 可通过 `.skillRegistry()` 挂载过程性知识。LLM 通过 tool-calling 自主点选 skill（在 function 列表里以无参数 function 出现，description 带 `[Skill]` 前缀），点选后内容作为 `system` 消息注入对话（PERSISTENT 常驻）。skill 走独立执行路径，不经过 tool 拦截器；激活时触发 `AgentEvent.SkillActivated` 事件 + trace span。`build()` 时校验 skill 名与 tool/sub-agent/保留名互斥（fail-fast）。
+- **SubAgent Skill 预加载（D13）**：`SubAgentRegistration.skillRegistry(SkillRegistry)` 允许子代理挂载 skill。委派执行时子 agent 可像顶层 Agent 一样按需点选 skill。子 agent 范围内的 skill 名 vs tool 名冲突在委派构造时自动校验（复用 `validateSkillNaming`）。填补 SubAgent 重做裁剪清单 D13 的坑。
 
 ## [0.10.0] - 2026-07-09
 

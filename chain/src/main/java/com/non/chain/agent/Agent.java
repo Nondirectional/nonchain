@@ -763,6 +763,10 @@ public class Agent {
         for (AfterToolCall a : def.afterInterceptors()) {
             childBuilder.addAfterToolCall(a);
         }
+        // D13 子代理 skill 预加载:把 def 的 skillRegistry 传给子代理
+        if (def.skillRegistry() != null) {
+            childBuilder.skillRegistry(def.skillRegistry());
+        }
         // 边界1(SubAgent 全树下钻):录制层不隔离,注入父 tracer + current SpanContext
         if (tracer != null) {
             SpanContext subParentCtx = Tracer.current();
