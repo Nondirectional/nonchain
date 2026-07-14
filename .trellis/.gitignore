@@ -24,15 +24,6 @@
 # Update backup directories
 .backup-*
 
-# Worktrees (per-dev, local)
-worktrees/
-
-# Template version hashes (per-install)
-.template-hashes.json
-
-# Local cache
-.cache/
-
 # Conflict resolution temp files
 *.new
 
