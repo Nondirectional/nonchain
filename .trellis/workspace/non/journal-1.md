@@ -1428,3 +1428,36 @@ Refactor DashscopeLLM into multi-provider architecture, add generic OpenAI-compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 32: 完成 Skill 注入角色配置
+
+**Date**: 2026-07-14
+**Task**: 完成 Skill 注入角色配置
+**Branch**: `feat/skill-system`
+
+### Summary
+
+新增 SkillInjectionMode，默认 SYSTEM，支持 Agent.Builder 显式 USER 注入；子代理传播配置，补齐测试、README、VLLM 示例和后端规范。定向、chain、chain-example 与全仓 Maven 测试通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8877d72` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
