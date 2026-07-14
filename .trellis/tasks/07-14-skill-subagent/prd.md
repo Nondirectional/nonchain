@@ -3,14 +3,24 @@
 > 父任务: `07-14-skill-system`(grill 总览共识见父 PRD)
 > 前置依赖: `07-14-skill-agent`(MVP 必须先落地,本任务在其基础上扩展)
 
+## 进度
+
+- [x] **第一块 SubAgent skill 预加载(D13)— 已完成(2026-07-14)**
+  - SubAgentDefinition 加 skillRegistry 字段 + accessor
+  - SubAgentRegistration 加 `.skillRegistry()` Builder 方法
+  - runSubAgentInternal 委派构造时传递 skillRegistry
+  - 子 agent 命名校验自动复用顶层 validateSkillNaming
+  - 测试:SubAgentSkillTest 3/3 全绿(点选注入 + 命名冲突 + 零回归)
+- [ ] 第二块延后项(EPHEMERAL / 动态 content / SkillLoader)— 未开始,仍 deferred
+
 ## Goal
 
 分两块扩展 skill 系统:
 
 1. **填 D13 的坑:** 让 SubAgent 也能挂 skill——`SubAgentDefinition` 加 `skillRegistry` 字段,
    委派构造子 agent 时传入。这正是 SubAgent 重做 PRD 裁剪清单 D13 (`skill 预加载 | nonchain 无技能系统`)
-   当初留下的坑。
-2. **落地 MVP 砍掉的延后项:** EPHEMERAL 生命周期、动态 content、外部文件加载。
+   当初留下的坑。**(✅ 已完成)**
+2. **落地 MVP 砍掉的延后项:** EPHEMERAL 生命周期、动态 content、外部文件加载。**(⏳ deferred)**
 
 ## Requirements
 
