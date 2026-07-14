@@ -1494,3 +1494,36 @@ Refactor DashscopeLLM into multi-provider architecture, add generic OpenAI-compa
 ### Next Steps
 
 - None - task complete
+
+
+## Session 34: SubAgent 上下文归一化与模型兼容
+
+**Date**: 2026-07-14
+**Task**: SubAgent 上下文归一化与模型兼容
+**Branch**: `feat/skill-system`
+
+### Summary
+
+完成 SubAgent 父 system 隔离、不可见消息和工具调用组归一化；新增 LLM 多 system 能力声明与请求副本降级，SYSTEM Skill 在不支持多 system 的模型上自动转为带框架边界的 USER 消息。补充前台/后台/Skill/provider 回归测试，全仓 414 个测试通过。
+
+### Main Changes
+
+- Detailed change bullets were not supplied; see the summary above.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9628a69` | (see git log) |
+
+### Testing
+
+- Validation was not recorded for this session.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
