@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write   # jacoco-report posts a comment on PRs
+
+jobs:
+  build:
+    name: Build & Test (JDK ${{ matrix.jdk }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        jdk: [11, 17, 21]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ matrix.jdk }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.jdk }}
+          cache: maven
+
+      - name: Build & verify
+        run: mvn -B clean verify
+
+      # Coverage reporting only on the baseline JDK (pom minimum = 11).
+      # Running it on every matrix entry duplicates PR comments.
+      - name: Generate JaCoCo report
+        if: matrix.jdk == 11
+        run: mvn -B jacoco:report
+
+      - name: Coverage diff comment
+        if: github.event_name == 'pull_request' && matrix.jdk == 11
+        uses: Mad1tzc/jacoco-report@v1.2
+        with:
+          # Only modules with tests generate jacoco.xml.
+          # chain-elasticsearch and chain-example have no tests → omitted.
+          paths: |
+            ${{ github.workspace }}/chain/target/site/jacoco/jacoco.xml
+            ${{ github.workspace }}/chain-document/target/site/jacoco/jacoco.xml
+            ${{ github.workspace }}/chain-mysql/target/site/jacoco/jacoco.xml
+            ${{ github.workspace }}/chain-postgres/target/site/jacoco/jacoco.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # Starting thresholds — will tighten after first run reveals baseline.
+          min-coverage-overall: 60
+          min-coverage-changed-files: 60
+          title: 📊 Coverage report

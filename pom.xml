@@ -23,5 +23,27 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <maven.compiler.source>11</maven.compiler.source>
     <maven.compiler.target>11</maven.compiler.target>
+    <jacoco-maven-plugin.version>0.8.12</jacoco-maven-plugin.version>
   </properties>
+
+  <build>
+    <plugins>
+      <!-- JaCoCo: prepare coverage agent for all modules.
+           No `check` goal here — coverage thresholds are enforced in CI
+           (.github/workflows/ci.yml) to avoid blocking local builds. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>${jacoco-maven-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
