@@ -5,6 +5,7 @@ import co.elastic.clients.elasticsearch._types.ElasticsearchException;
 import co.elastic.clients.elasticsearch._types.KnnSearch;
 import co.elastic.clients.elasticsearch._types.SortOrder;
 import co.elastic.clients.elasticsearch._types.mapping.DenseVectorProperty;
+import co.elastic.clients.elasticsearch._types.mapping.DenseVectorSimilarity;
 import co.elastic.clients.elasticsearch._types.mapping.KeywordProperty;
 import co.elastic.clients.elasticsearch._types.mapping.ObjectProperty;
 import co.elastic.clients.elasticsearch._types.mapping.TextProperty;
@@ -259,8 +260,8 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
         KnnSearch.Builder knnBuilder = new KnnSearch.Builder()
                 .field(ElasticsearchSearchSupport.FIELD_EMBEDDING)
                 .queryVector(support.toQueryVector(request.queryEmbedding()))
-                .k((long) request.size())
-                .numCandidates((long) request.numCandidates());
+                .k(request.size())
+                .numCandidates(request.numCandidates());
         if (filter != null) {
             knnBuilder.filter(filter);
         }
@@ -350,34 +351,34 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
     private Query buildCenterChunkQuery(ContextExpansionRequest request) {
         return buildScopedQuery(
                 request,
-                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                Query.of(q -> q.range(r -> r.untyped(u -> u.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
                         .gte(JsonData.of(request.centerChunkIndex()))
-                        .lte(JsonData.of(request.centerChunkIndex()))))
+                        .lte(JsonData.of(request.centerChunkIndex())))))
         );
     }
 
     private Query buildWindowQuery(ContextExpansionRequest request, int startIndex, int endIndex) {
         return buildScopedQuery(
                 request,
-                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                Query.of(q -> q.range(r -> r.untyped(u -> u.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
                         .gte(JsonData.of(startIndex))
-                        .lte(JsonData.of(endIndex))))
+                        .lte(JsonData.of(endIndex)))))
         );
     }
 
     private Query buildBeforeQuery(ContextExpansionRequest request, int startIndex) {
         return buildScopedQuery(
                 request,
-                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
-                        .lt(JsonData.of(startIndex))))
+                Query.of(q -> q.range(r -> r.untyped(u -> u.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .lt(JsonData.of(startIndex)))))
         );
     }
 
     private Query buildAfterQuery(ContextExpansionRequest request, int endIndex) {
         return buildScopedQuery(
                 request,
-                Query.of(q -> q.range(r -> r.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
-                        .gt(JsonData.of(endIndex))))
+                Query.of(q -> q.range(r -> r.untyped(u -> u.field(ElasticsearchSearchSupport.FIELD_CHUNK_INDEX)
+                        .gt(JsonData.of(endIndex)))))
         );
     }
 
@@ -418,7 +419,7 @@ public class ElasticsearchKnowledgeStore implements KnowledgeStore {
                         .properties(ElasticsearchSearchSupport.FIELD_EMBEDDING, p -> p.denseVector(DenseVectorProperty.of(d -> d
                                 .dims(finalDims)
                                 .index(true)
-                                .similarity("cosine")
+                                .similarity(DenseVectorSimilarity.Cosine)
                         )))
                 )
         ));

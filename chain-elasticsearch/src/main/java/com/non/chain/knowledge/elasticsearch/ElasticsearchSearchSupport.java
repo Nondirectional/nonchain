@@ -213,13 +213,13 @@ final class ElasticsearchSearchSupport {
                         Query.of(q2 -> q2.term(t -> t.field(field).value(toFieldValue(value))))
                 )));
             case GT:
-                return Query.of(q -> q.range(r -> r.field(field).gt(toJsonData(value))));
+                return Query.of(q -> q.range(r -> r.untyped(u -> u.field(field).gt(toJsonData(value)))));
             case GTE:
-                return Query.of(q -> q.range(r -> r.field(field).gte(toJsonData(value))));
+                return Query.of(q -> q.range(r -> r.untyped(u -> u.field(field).gte(toJsonData(value)))));
             case LT:
-                return Query.of(q -> q.range(r -> r.field(field).lt(toJsonData(value))));
+                return Query.of(q -> q.range(r -> r.untyped(u -> u.field(field).lt(toJsonData(value)))));
             case LTE:
-                return Query.of(q -> q.range(r -> r.field(field).lte(toJsonData(value))));
+                return Query.of(q -> q.range(r -> r.untyped(u -> u.field(field).lte(toJsonData(value)))));
             case IN: {
                 @SuppressWarnings("unchecked")
                 List<Object> values = (List<Object>) value;
