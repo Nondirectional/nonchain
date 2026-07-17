@@ -97,8 +97,8 @@ public class HybridRetriever {
         KnnSearch.Builder knnBuilder = new KnnSearch.Builder()
                 .field(ElasticsearchSearchSupport.FIELD_EMBEDDING)
                 .queryVector(support.toQueryVector(request.queryEmbedding()))
-                .k((long) request.rankWindowSize())
-                .numCandidates((long) request.numCandidates());
+                .k(request.rankWindowSize())
+                .numCandidates(request.numCandidates());
         if (filter != null) {
             knnBuilder.filter(filter);
         }
