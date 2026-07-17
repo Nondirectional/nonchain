@@ -41,7 +41,7 @@ jobs:
 
       - name: Coverage diff comment
         if: github.event_name == 'pull_request' && matrix.jdk == 11
-        uses: Mad1tzc/jacoco-report@v1.2
+        uses: Madrapps/jacoco-report@v1.8.0
         with:
           # Only modules with tests generate jacoco.xml.
           # chain-elasticsearch and chain-example have no tests → omitted.
