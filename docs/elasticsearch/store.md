@@ -15,7 +15,7 @@
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
     <version>0.11.0</version>
 </dependency>

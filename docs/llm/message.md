@@ -255,7 +255,7 @@ LLM llm = new OpenAICompatibleLLM("http://localhost:8000/v1", "model-name")
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
     <version>0.11.0</version>
 </dependency>

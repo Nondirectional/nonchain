@@ -398,17 +398,17 @@ mvn compile exec:java -pl chain-example \
 ```xml
 <dependencies>
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain</artifactId>
         <version>0.11.0</version>
     </dependency>
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-elasticsearch</artifactId>
         <version>0.11.0</version>
     </dependency>
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-document</artifactId>
         <version>0.11.0</version>
     </dependency>

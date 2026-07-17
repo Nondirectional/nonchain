@@ -302,7 +302,7 @@ public class ReaderRegistryExample {
 ```xml
 <!-- chain-document 模块依赖（所有解析器的依赖均为 optional） -->
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
     <version>0.11.0</version>
 </dependency>
