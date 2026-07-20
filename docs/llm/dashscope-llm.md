@@ -18,7 +18,7 @@ export DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
     <version>0.11.0</version>
 </dependency>

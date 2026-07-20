@@ -12,7 +12,7 @@
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
     <version><!-- use latest --></version>
 </dependency>

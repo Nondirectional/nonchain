@@ -23,7 +23,7 @@
 ### 克隆项目
 
 ```bash
-git clone https://github.com/nondirectionl/nonchain.git
+git clone https://github.com/Nondirectional/nonchain.git
 cd nonchain
 ```
 
@@ -48,7 +48,7 @@ mvn install -pl chain -am        # 仅构建核心模块
 mvn install -pl chain-document -am  # 仅构建文档处理模块
 ```
 
-构建成功后，各模块的 JAR 包将安装到本地 Maven 仓库（`~/.m2/repository/com/non/`）。
+构建成功后，各模块的 JAR 包将安装到本地 Maven 仓库（`~/.m2/repository/io/github/nondirectional/`）。
 
 ## Maven 依赖
 
@@ -60,7 +60,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -78,7 +78,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -129,7 +129,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -152,14 +152,14 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependencies>
     <!-- 核心模块 -->
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain</artifactId>
         <version>0.11.0</version>
     </dependency>
 
     <!-- 文档处理模块 -->
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-document</artifactId>
         <version>0.11.0</version>
     </dependency>
@@ -193,7 +193,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
     <!-- Elasticsearch 检索 -->
     <dependency>
-        <groupId>com.non</groupId>
+        <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-elasticsearch</artifactId>
         <version>0.11.0</version>
     </dependency>

@@ -26,7 +26,7 @@ mvn -version
 从 GitHub 克隆项目并安装到本地 Maven 仓库：
 
 ```bash
-git clone https://github.com/nondirectionl/nonchain.git
+git clone https://github.com/Nondirectional/nonchain.git
 cd nonchain
 mvn install -DskipTests
 ```
@@ -43,7 +43,7 @@ mvn install -DskipTests
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -55,7 +55,7 @@ mvn install -DskipTests
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -67,7 +67,7 @@ mvn install -DskipTests
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
     <version>0.11.0</version>
 </dependency>
@@ -79,7 +79,7 @@ mvn install -DskipTests
 
 ```xml
 <dependency>
-    <groupId>com.non</groupId>
+    <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-mysql</artifactId>
     <version>0.11.0</version>
 </dependency>
