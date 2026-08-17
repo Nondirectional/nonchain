@@ -44,7 +44,7 @@ groupId 为 `io.github.nondirectional`（注意：`com.non.chain.*` 是 Java 包
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -55,21 +55,21 @@ groupId 为 `io.github.nondirectional`（注意：`com.non.chain.*` 是 Java 包
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 
 <!-- Elasticsearch 向量检索 / BM25 / 混合检索 -->
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 
 <!-- 持久化：对话记忆 + 执行链路遥测（二选一） -->
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-mysql</artifactId>      <!-- 或 chain-postgres -->
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 

@@ -25,7 +25,7 @@ vLLM 兼容 OpenAI Chat Completions API，`OpenAICompatibleLLM` 可以完成基�
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -50,7 +50,12 @@ API Key 为可选参数。大多数 vLLM 部署不需要认证，可以不传 AP
 | `temperature(Double temperature)` | `VLLM` | 采样温度，控制生成文本多样性 |
 | `topP(Double topP)` | `VLLM` | 核采样概率阈值 |
 | `maxCompletionTokens(Integer)` | `VLLM` | 最大生成 token 数 |
+| `contextWindow(long tokens)` | `VLLM` | 声明模型上下文窗口大小（tokens），仅作元数据，不影响请求 |
 | `callback(ChainCallback)` | `VLLM` | 设置回调 |
+
+## 流式 token usage
+
+vLLM 默认不在流式响应中返回 token usage。`VLLM` 会在流式请求中自动携带 `stream_options: {"include_usage": true}`，使最后一个 chunk 携带 usage 统计，`ChatResult.tokenUsage()` 在流式调用下同样可用。该参数仅追加到流式请求，同步调用保持原请求契约。
 
 ## 使用示例
 
