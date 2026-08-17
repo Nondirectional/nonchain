@@ -4,6 +4,15 @@
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
+## [0.11.1] - 2026-07-21
+
+### 新增
+
+- **LLM 上下文窗口元数据**：`LLM` 接口新增 `contextWindow()` / `contextWindow(long)` 默认方法（默认 -1 表示未知）；`AbstractOpenAILLM` 提供字段 + fluent setter + getter 实现，链式 `.contextWindow(131072L)` 声明。框架自身不做截断决策，仅作元数据透出。
+- **`ChatResult.contextWindow()`**：新增字段 + 全参构造器 + `withContextWindow(long)` 副本方法。`Agent.run` 成功路径在 return 前用 `llm.contextWindow()` 回填到最终 ChatResult，应用层可结合 `tokenUsage().promptTokens()` 计算「已用/上限」占比供 UI 展示。
+- **vLLM 流式 token usage**：`VLLM` 在 `streamChat` 请求中自动发送 `stream_options.include_usage=true`，仅流式调用追加该参数，同步工具轮保持原请求契约。
+- **OpenAI OkHttp 运行依赖**：`chain` 显式声明 `openai-java-client-okhttp`，确保 `OpenAIOkHttpClient` 随应用运行包分发。
+
 ## [0.11.0] - 2026-07-15
 
 ### 新增

@@ -47,6 +47,11 @@ public abstract class AbstractOpenAILLM implements LLM {
     private Double topP;
     private OutputFormat defaultOutputFormat = OutputFormat.TEXT;
     private boolean supportsMultipleSystemMessages = true;
+    /**
+     * 当前模型的上下文窗口大小（tokens）；null 表示未声明，{@link #contextWindow()} 兜底返回 -1。
+     * 仅作为元数据供应用层读取，框架不做截断决策。
+     */
+    private Long contextWindow;
 
     protected AbstractOpenAILLM(String baseUrl, String apiKey, String model) {
         this.client = OpenAIOkHttpClient.builder()
@@ -94,6 +99,15 @@ public abstract class AbstractOpenAILLM implements LLM {
         return this;
     }
 
+    /**
+     * 声明当前模型实例的上下文窗口大小（tokens）。仅作元数据，不影响请求构造。
+     */
+    @Override
+    public AbstractOpenAILLM contextWindow(long contextWindow) {
+        this.contextWindow = contextWindow;
+        return this;
+    }
+
     public AbstractOpenAILLM callback(ChainCallback callback) {
         this.callback = callback != null ? callback : ChainCallbackUtil.noop();
         return this;
@@ -111,6 +125,11 @@ public abstract class AbstractOpenAILLM implements LLM {
     @Override
     public boolean supportsMultipleSystemMessages() {
         return supportsMultipleSystemMessages;
+    }
+
+    @Override
+    public long contextWindow() {
+        return contextWindow != null ? contextWindow : -1L;
     }
 
     // ---- Protected accessors for subclasses ----
@@ -334,6 +353,15 @@ public abstract class AbstractOpenAILLM implements LLM {
     }
 
     /**
+     * 应用仅流式请求需要的参数。同步 chat 不会调用此钩子。
+     * 子类可用于声明 OpenAI 兼容服务的流式 usage 等扩展选项。
+     */
+    protected void applyStreamingAdditionalParams(ChatCompletionCreateParams.Builder builder,
+                                                  OutputFormat outputFormat) {
+        // default no-op
+    }
+
+    /**
      * 注入 thinking 相关参数。
      * 子类可覆写此方法以支持不同提供商的 thinking 参数格式。
      * 默认实现将 enable_thinking 和 thinking_budget 作为平级属性发送。
@@ -433,6 +461,7 @@ public abstract class AbstractOpenAILLM implements LLM {
 
     private ChatResult doStreamChat(ChatCompletionCreateParams.Builder builder, OutputFormat outputFormat, Consumer<ChatChunk> callback) {
         applyAdditionalParams(builder, outputFormat);
+        applyStreamingAdditionalParams(builder, outputFormat);
 
         StringBuilder contentBuilder = new StringBuilder();
         StringBuilder thinkingBuilder = new StringBuilder();
@@ -580,15 +609,22 @@ public abstract class AbstractOpenAILLM implements LLM {
         final StringBuilder arguments = new StringBuilder();
 
         void accumulate(ChatChunk.DeltaToolCall delta) {
-            if (delta.id() != null) {
+            if (hasText(delta.id())) {
                 this.id = delta.id();
             }
-            if (delta.name() != null) {
+            // OpenAI-compatible gateways may emit an empty name in a later
+            // delta after the initial function name. Never overwrite a
+            // previously assembled non-blank value with that placeholder.
+            if (hasText(delta.name())) {
                 this.name = delta.name();
             }
             if (delta.argumentsDelta() != null) {
                 this.arguments.append(delta.argumentsDelta());
             }
+        }
+
+        private static boolean hasText(String value) {
+            return value != null && !value.isBlank();
         }
 
         ToolCall toToolCall() {
