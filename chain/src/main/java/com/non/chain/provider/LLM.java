@@ -39,6 +39,26 @@ public interface LLM {
         return MessageNormalizer.normalizeForRequest(messages, supportsMultipleSystemMessages());
     }
 
+    /**
+     * 当前模型的上下文窗口大小（tokens），用于 UI 展示「已用/上限」等指标。
+     *
+     * <p>默认 -1 表示未知；具体 provider/实例应通过 {@link #contextWindow(long)} 显式声明。
+     * 框架自身不会用它做截断或决策，仅作为元数据透出给应用层。</p>
+     */
+    default long contextWindow() {
+        return -1;
+    }
+
+    /**
+     * 声明当前 LLM 实例的上下文窗口大小（tokens）。
+     *
+     * <p>内置 provider 提供可链式实现；自定义 LLM 若需运行时配置可覆写此方法。
+     * 默认实现显式失败，避免静默忽略调用方的配置。</p>
+     */
+    default LLM contextWindow(long tokens) {
+        throw new UnsupportedOperationException("当前 LLM 不支持配置上下文窗口大小");
+    }
+
     // ---- 同步调用 ----
 
     /**

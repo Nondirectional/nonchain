@@ -6,7 +6,7 @@
   <parent>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>nonchain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
   </parent>
 
   <artifactId>chain</artifactId>
@@ -17,6 +17,12 @@
     <dependency>
       <groupId>com.openai</groupId>
       <artifactId>openai-java</artifactId>
+      <version>4.43.0</version>
+    </dependency>
+    <!-- AbstractOpenAILLM directly constructs OpenAIOkHttpClient; openai-java does not expose this optional client transitively. -->
+    <dependency>
+      <groupId>com.openai</groupId>
+      <artifactId>openai-java-client-okhttp</artifactId>
       <version>4.43.0</version>
     </dependency>
     <dependency>

@@ -252,8 +252,9 @@ public class Agent {
             rootSpan.putAttribute(SpanAttributes.MAX_ITERATIONS, maxIterations);
             try {
                 ChatResult result = doRunWithLoop(messages, eventConsumer);
-                // 成功路径：回填 runtimeId（失败路径在 catch 里 attach marker）
-                return result.withRuntimeId(rootSpan.runtimeId());
+                // 成功路径：回填 runtimeId + contextWindow（失败路径在 catch 里 attach marker）
+                return result.withRuntimeId(rootSpan.runtimeId())
+                        .withContextWindow(llm.contextWindow());
             } catch (RuntimeException | Error e) {
                 // 失败路径：保留原异常类型/栈/语义不变，仅附加 suppressed trace marker
                 TraceRuntimeIds.attach(e, rootSpan.runtimeId());

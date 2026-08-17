@@ -149,6 +149,20 @@ private Map<String, Object> parseArguments(String json) {
 
 ---
 
+## Convention: Streaming Tool-Call Delta Accumulation
+
+OpenAI-compatible streaming gateways may repeat tool-call metadata across deltas. A later delta
+can contain `function.name: ""` after an earlier delta supplied the real function name.
+
+**Contracts to preserve**:
+- Accumulate `id` and `name` only from non-blank fragments.
+- Never overwrite an already assembled non-blank `id` or `name` with an empty placeholder.
+- Append argument fragments in arrival order, including empty fragments.
+- Keep a regression test for a valid initial name followed by an empty-name delta.
+
+The implementation lives in `AbstractOpenAILLM.ToolCallAccumulator`, and the regression test
+is `AbstractOpenAILLMStreamingToolCallTest`.
+
 ## Convention: Tool Interceptors vs Callback (control vs observation)
 
 **What**: `ToolRegistry.execute` does **not** trigger `ChainCallback`. Tool lifecycle callbacks (`onToolStart`/`onToolComplete`/`onToolError`) are fired exclusively by the `Agent` orchestration layer (once per tool call). `ToolRegistry` is a pure executor.

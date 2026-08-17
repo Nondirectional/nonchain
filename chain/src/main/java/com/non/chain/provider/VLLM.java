@@ -1,5 +1,6 @@
 package com.non.chain.provider;
 
+import com.non.chain.OutputFormat;
 import com.non.chain.callback.ChainCallback;
 import com.non.chain.callback.ChainContext;
 import com.openai.core.JsonValue;
@@ -121,5 +122,16 @@ public class VLLM extends OpenAICompatibleLLM {
         if (getThinkingBudget() != null) {
             builder.putAdditionalBodyProperty("thinking_token_budget", JsonValue.from(getThinkingBudget()));
         }
+    }
+
+    /**
+     * vLLM 仅在流式请求声明该选项时，才会在最后一个 chunk 返回 token usage。
+     */
+    @Override
+    protected void applyStreamingAdditionalParams(ChatCompletionCreateParams.Builder builder,
+                                                  OutputFormat outputFormat) {
+        super.applyStreamingAdditionalParams(builder, outputFormat);
+        builder.putAdditionalBodyProperty("stream_options", JsonValue.from(
+                Map.of("include_usage", true)));
     }
 }
