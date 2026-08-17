@@ -62,7 +62,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -70,7 +70,8 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| `com.openai:openai-java` | 4.30.0 | OpenAI Java SDK，用于 DashScope 兼容的 API 调用 |
+| `com.openai:openai-java` | 4.43.0 | OpenAI Java SDK，用于 DashScope 兼容的 API 调用 |
+| `com.openai:openai-java-client-okhttp` | 4.43.0 | OpenAI SDK 的 OkHttp 客户端实现，`AbstractOpenAILLM` 直接使用其 `OpenAIOkHttpClient` |
 
 ### 文档处理模块 `chain-document`
 
@@ -80,7 +81,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -131,7 +132,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -154,14 +155,14 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
 
     <!-- 文档处理模块 -->
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
 
     <!-- 文档解析 optional 依赖 -->
@@ -195,7 +196,7 @@ mvn install -pl chain-document -am  # 仅构建文档处理模块
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
 </dependencies>
 ```

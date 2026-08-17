@@ -39,7 +39,10 @@ API Key 为可选参数。对于内网无认证的部署环境，可以不传 AP
 | `temperature(Double temperature)` | `OpenAICompatibleLLM` | 采样温度，控制生成文本多样性，范围 [0, 2) |
 | `topP(Double topP)` | `OpenAICompatibleLLM` | 核采样概率阈值，范围 (0, 1.0] |
 | `maxCompletionTokens(Integer)` | `OpenAICompatibleLLM` | 最大生成 token 数 |
+| `contextWindow(long tokens)` | `OpenAICompatibleLLM` | 声明模型上下文窗口大小（tokens），仅作元数据，不影响请求 |
 | `callback(ChainCallback)` | `OpenAICompatibleLLM` | 设置回调 |
+
+`contextWindow` 是可选元数据：框架不做任何截断决策，`Agent.run` 结束时会把它回填到 `ChatResult.contextWindow()`，应用层可结合 `tokenUsage().promptTokens()` 计算上下文占用占比用于 UI 展示。
 
 ## 使用示例
 

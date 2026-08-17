@@ -97,6 +97,7 @@ String url = imagePart.url();
 | `content` | `String` | 模型的回复内容 |
 | `thinkingContent` | `String` | 模型的思考过程（启用思考模式时可用） |
 | `toolCalls` | `List<ToolCall>` | 模型请求的工具调用列表 |
+| `contextWindow` | `long` | 本次执行所用 LLM 的上下文窗口大小（tokens），-1 表示未声明 |
 
 ### 方法
 
@@ -108,6 +109,7 @@ String url = imagePart.url();
 | `hasThinking()` | `boolean` | 是否包含思考内容 |
 | `hasToolCalls()` | `boolean` | 是否包含工具调用 |
 | `toMessage()` | `Message` | 自动转换为 Message 对象 |
+| `contextWindow()` | `long` | 获取 LLM 上下文窗口大小（tokens），-1 表示未声明。`Agent.run` 会自动从 LLM 实例回填，可结合 `tokenUsage().promptTokens()` 计算「已用/上限」占比 |
 
 ### toMessage() 转换逻辑
 
@@ -257,7 +259,7 @@ LLM llm = new OpenAICompatibleLLM("http://localhost:8000/v1", "model-name")
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 

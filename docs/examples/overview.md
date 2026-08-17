@@ -400,17 +400,17 @@ mvn compile exec:java -pl chain-example \
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-elasticsearch</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
     <dependency>
         <groupId>io.github.nondirectional</groupId>
         <artifactId>chain-document</artifactId>
-        <version>0.11.0</version>
+        <version>0.11.1</version>
     </dependency>
     <!-- LLM API -->
     <dependency>

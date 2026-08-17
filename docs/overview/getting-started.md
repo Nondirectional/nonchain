@@ -45,7 +45,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -57,7 +57,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -69,7 +69,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-elasticsearch</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 
@@ -81,7 +81,7 @@ mvn install -DskipTests
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-mysql</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 ```
 

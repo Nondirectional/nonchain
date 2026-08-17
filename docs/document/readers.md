@@ -304,7 +304,7 @@ public class ReaderRegistryExample {
 <dependency>
     <groupId>io.github.nondirectional</groupId>
     <artifactId>chain-document</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
 </dependency>
 
 <!-- 使用时需根据实际使用的解析器添加对应依赖 -->
